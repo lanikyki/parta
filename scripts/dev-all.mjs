@@ -167,15 +167,30 @@ function shareNotes(url, env) {
   }
   const mail = (env.SMTP_USER || '').trim() && (env.SMTP_PASS || '').trim();
   if (!mail) {
-    say('  • Почта не настроена: код для регистрации друга появится в этом окне (строка «[Почта] … Код …») —');
-    say('    продиктуйте его другу. А на урок по ссылке друг может зайти как гость, без регистрации.');
-  }
+    say('  • Почта не настроена: код для регистрации друга появится в этом окне (строка «Код для …») —');
+    say('    продиктуйте его другу.');
+  } else say('  • Если письмо с кодом не дойдёт, код появится в этом окне (строка «Код для …») — продиктуйте его другу.');
+  say('  • По ссылке на урок друг может зайти как гость — без регистрации.');
+  say('  • Ссылка или видео работают с перебоями — README, «Показать сайт другу» → «Если связь рвётся».');
   say(`\nОстановить — Ctrl+C в этом окне.\n`);
 }
 
 async function share(env, children, stop) {
-  if (await isUp(SITE)) say('\nСайт уже запущен в другом окне — открою доступ к нему.');
-  else {
+  if (await isUp(SITE)) {
+    // Режим «для себя» (start-windows, npm run dev) по ссылке не показываем: он медленный,
+    // а друг увидел бы служебные подсказки. Для показа нужен свой запуск — собранный сайт.
+    const h = await fetch(`${SITE}/api/health`, { signal: AbortSignal.timeout(5000) })
+      .then((r) => r.json())
+      .catch(() => null);
+    if (h?.dev !== false) {
+      say(`\nНа ${SITE} уже работает сайт из другого окна (start-windows.bat или npm run dev).`);
+      say('Это режим «для себя»: показывать его по ссылке нельзя — он медленный и может «лечь».');
+      say('Закройте то окно (или нажмите в нём Ctrl+C) и запустите share-windows.bat ещё раз.');
+      stop();
+      process.exit(1);
+    }
+    say('\nСайт уже запущен в другом окне — открою доступ к нему.');
+  } else {
     const sig = sourceSignature();
     const built = fs.existsSync(path.join(ROOT, '.next', 'BUILD_ID')) && fs.existsSync(BUILD_SIG) && fs.readFileSync(BUILD_SIG, 'utf8') === sig;
     if (!built) {
