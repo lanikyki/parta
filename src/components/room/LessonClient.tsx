@@ -7,6 +7,7 @@ import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { Logo } from '@/components/Logo';
 import { WaitHint, useHydrated } from '@/components/useHydrated';
+import { shareOrigin, usePublicOrigin } from '@/lib/publicOrigin';
 import { type Devices, isMediaError, mediaErrorText, missingText, probeDevices } from './devices';
 import { RoomUI } from './RoomUI';
 
@@ -23,12 +24,13 @@ const ROOM_OPTIONS: RoomOptions = {
 
 function CopyInvite({ code }: { code: string }) {
   const [done, setDone] = useState(false);
+  usePublicOrigin();
   return (
     <button
       type="button"
       className="btn btn-soft h-auto min-h-12 py-3 text-center leading-tight whitespace-normal"
       onClick={async () => {
-        const url = `${location.origin}/lesson/${code}`;
+        const url = `${shareOrigin()}/lesson/${code}`;
         try {
           await navigator.clipboard.writeText(url);
           setDone(true);

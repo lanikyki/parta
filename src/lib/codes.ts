@@ -74,21 +74,35 @@ export async function checkCode(
 ): Promise<{ ok: true; payload: unknown } | { ok: false; error: string; gone?: boolean }> {
   const digits = code.replace(/\D/g, '');
   if (digits.length !== 6) return { ok: false, error: 'Введите 6 цифр из письма' };
-  const used = await one<{ payload: string | null }>(
-    `delete from email_codes where email = $1 and purpose = $2 and code_hash = $3 and expires_at > now() and attempts < $4 returning payload`,
-    [email, purpose, hash(email, purpose, digits), MAX_ATTEMPTS],
+  // Сначала списываем попытку (одним запросом), потом сравниваем: так сотня одновременных запросов
+  // с разными кодами не получит больше MAX_ATTEMPTS попыток угадать
+  const row = await one<{ code_hash: string; attempts: number }>(
+    `update email_codes set attempts = attempts + 1
+      where email = $1 and purpose = $2 and expires_at > now() and attempts < $3
+      returning code_hash, attempts`,
+    [email, purpose, MAX_ATTEMPTS],
   );
-  if (used) {
+  if (!row) {
+    const left = await one<Row>('select * from email_codes where email = $1 and purpose = $2', [email, purpose]);
+    if (!left || ms(left.expires_at) < Date.now()) return { ok: false, gone: true, error: 'Код устарел — нажмите «Отправить код ещё раз»' };
+    return { ok: false, gone: true, error: 'Слишком много неверных попыток — запросите новый код' };
+  }
+  const want = hash(email, purpose, digits);
+  if (crypto.timingSafeEqual(Buffer.from(row.code_hash), Buffer.from(want))) {
+    // Верный код удаляем сразу — второй раз им не воспользоваться
+    const used = await one<{ payload: string | null }>('delete from email_codes where email = $1 and purpose = $2 and code_hash = $3 returning payload', [
+      email,
+      purpose,
+      want,
+    ]);
+    if (!used) return { ok: false, gone: true, error: 'Код уже использован — запросите новый' };
     try {
       return { ok: true, payload: used.payload ? JSON.parse(used.payload) : null };
     } catch {
       return { ok: true, payload: null };
     }
   }
-  const row = await one<Row>('select * from email_codes where email = $1 and purpose = $2', [email, purpose]);
-  if (!row || ms(row.expires_at) < Date.now()) return { ok: false, gone: true, error: 'Код устарел — нажмите «Отправить код ещё раз»' };
-  const left = MAX_ATTEMPTS - row.attempts - 1;
-  await q('update email_codes set attempts = attempts + 1 where email = $1 and purpose = $2', [email, purpose]);
+  const left = MAX_ATTEMPTS - row.attempts;
   if (left <= 0) return { ok: false, gone: true, error: 'Слишком много неверных попыток — запросите новый код' };
   return { ok: false, error: `Неверный код. Осталось попыток: ${left}` };
 }

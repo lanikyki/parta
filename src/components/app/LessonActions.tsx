@@ -3,16 +3,18 @@
 import { Check, Copy, Trash2 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
+import { shareOrigin, usePublicOrigin } from '@/lib/publicOrigin';
 
 export function CopyLink({ code, className = '' }: { code: string; className?: string }) {
   const [done, setDone] = useState(false);
+  usePublicOrigin();
   return (
     <button
       type="button"
       title="Скопировать ссылку на урок"
       className={`btn btn-line btn-sm ${className}`}
       onClick={async () => {
-        const url = `${location.origin}/lesson/${code}`;
+        const url = `${shareOrigin()}/lesson/${code}`;
         try {
           await navigator.clipboard.writeText(url);
         } catch {
