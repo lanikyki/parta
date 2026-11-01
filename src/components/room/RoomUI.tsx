@@ -41,6 +41,7 @@ import { formatSec, useElapsed as useWaitSec } from '@/components/app/useElapsed
 import { Board } from '@/components/board/Board';
 import type { Me } from '@/components/board/sync';
 import { renderMarkdown, renderMathText } from '@/lib/mathtext';
+import { shareOrigin, usePublicOrigin } from '@/lib/publicOrigin';
 import { mediaErrorText } from './devices';
 import type { LessonInfo } from './LessonClient';
 
@@ -98,6 +99,8 @@ function md(m: Msg) {
   let html = mdCache.get(m.id);
   if (html === undefined) {
     html = renderMarkdown(m.text);
+    // Кэш не растёт бесконечно на долгом уроке: старые записи выбрасываем
+    if (mdCache.size > 600) mdCache.delete(mdCache.keys().next().value!);
     mdCache.set(m.id, html);
   }
   return html;
@@ -684,6 +687,7 @@ function RoomShell(props: ShellProps) {
   const desktop = useIsDesktop();
   const elapsed = useElapsed();
   const chat = useLessonChat(lesson.code, room, me);
+  usePublicOrigin();
   const [tab, setTab] = useState<'chat' | 'people'>('chat');
   const [drawer, setDrawer] = useState(false);
   const [more, setMore] = useState(false);
@@ -722,7 +726,7 @@ function RoomShell(props: ShellProps) {
   }, []);
 
   const invite = useCallback(async () => {
-    const url = `${location.origin}/lesson/${lesson.code}`;
+    const url = `${shareOrigin()}/lesson/${lesson.code}`;
     try {
       await navigator.clipboard.writeText(url);
       showToast('Ссылка на урок скопирована');
