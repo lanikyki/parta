@@ -4,7 +4,7 @@ import { BRAND } from './brand';
 // Отправка писем через обычный почтовый ящик (Яндекс, Mail.ru, Gmail и любой SMTP).
 // Та же логика есть в scripts/check.mjs (smtpConf) — меняйте вместе.
 
-type Smtp = { host: string; port: number; secure: boolean; user: string; pass: string; from: string };
+type Smtp = { host: string; port: number; secure: boolean; user: string; pass: string; from: string; fixed?: boolean; requireTLS?: boolean };
 
 const clean = (v: string | undefined) => (v || '').trim().replace(/^["']|["']$/g, '').trim();
 
@@ -25,13 +25,14 @@ export function smtpConf(): Smtp | null {
   if (hp) [host, port] = [hp[1], port || Number(hp[2])];
   host = host.replace(/[/].*$/, '') || KNOWN_HOSTS.find(([re]) => re.test(user))?.[1] || '';
   if (!user || !pass || !host) return null;
+  const fixed = port > 0 || Boolean(clean(process.env.SMTP_SECURE)); // порт указан явно — запасной не пробуем
   port ||= 465;
   const sec = clean(process.env.SMTP_SECURE);
   const secure = sec ? !/^(0|false|no|нет)$/i.test(sec) : port === 465;
   if (/gmail/i.test(host)) pass = pass.replace(/\s+/g, ''); // Gmail показывает пароль приложения с пробелами
   const fromEnv = clean(process.env.MAIL_FROM);
   const from = fromEnv.includes('@') ? fromEnv : `${fromEnv || BRAND.name} <${user}>`;
-  return { host, port, secure, user, pass, from };
+  return { host, port, secure, user, pass, from, fixed };
 }
 
 export const mailConfigured = () => smtpConf() !== null;
@@ -44,9 +45,10 @@ function transporter(c: Smtp) {
       host: c.host,
       port: c.port,
       secure: c.secure,
+      requireTLS: c.requireTLS,
       auth: { user: c.user, pass: c.pass },
-      connectionTimeout: 15_000,
-      greetingTimeout: 15_000,
+      connectionTimeout: 10_000,
+      greetingTimeout: 10_000,
       socketTimeout: 30_000,
     });
     cached = { sig, t };
@@ -54,18 +56,46 @@ function transporter(c: Smtp) {
   return cached.t;
 }
 
+const netError = (e: unknown) => {
+  const err = e as { code?: string; message?: string } | null;
+  return /ETIMEDOUT|ECONNECTION|ESOCKET|ECONNREFUSED|ECONNRESET|EHOSTUNREACH|ENETUNREACH|timeout/i.test(`${err?.code ?? ''} ${err?.message ?? ''}`);
+};
+
+// Порт 465 иногда закрывает антивирус, VPN или провайдер — тогда пробуем 587 и запоминаем, какой сработал
+let preferAlt = false;
+const altOf = (c: Smtp): Smtp | null => (!c.fixed && c.port === 465 ? { ...c, port: 587, secure: false, requireTLS: true } : null);
+
+async function viaSmtp<T>(c: Smtp, run: (t: Transporter) => Promise<T>): Promise<T> {
+  const alt = altOf(c);
+  const order = alt ? (preferAlt ? [alt, c] : [c, alt]) : [c];
+  let first: unknown = null;
+  for (const conf of order) {
+    try {
+      const out = await run(transporter(conf));
+      preferAlt = conf === alt;
+      return out;
+    } catch (e) {
+      if (!netError(e)) throw e; // неверный пароль и т. п. — другой порт не поможет
+      first ??= e;
+    }
+  }
+  throw first;
+}
+
 /** Понятная причина, почему письмо не ушло. */
 export function mailErrorText(e: unknown) {
   const err = e as { code?: string; responseCode?: number; response?: string; message?: string } | null;
   const code = String(err?.code || '');
   const resp = String(err?.response || err?.message || e);
+  if (/access rights to this service/i.test(resp))
+    return 'Яндекс не пускает программы к этому ящику: в Яндекс Почте откройте ⚙ → «Все настройки» → «Почтовые программы» и включите IMAP и «Пароли приложений и OAuth-токены»';
   if (code === 'EAUTH' || err?.responseCode === 535 || err?.responseCode === 534)
     return 'неверный логин или пароль почты (SMTP_USER, SMTP_PASS). Для Яндекса, Mail.ru и Gmail нужен «пароль приложения», а не обычный пароль от почты';
   if (err?.responseCode === 553 || /sender address rejected|not owned/i.test(resp))
     return 'почта не разрешает отправлять от этого адреса — оставьте MAIL_FROM пустым (письма пойдут от SMTP_USER)';
   if (code === 'EDNS' || /ENOTFOUND|EAI_AGAIN/.test(resp)) return 'адрес почтового сервера SMTP_HOST не найден — проверьте, нет ли опечатки';
   if (['ETIMEDOUT', 'ECONNECTION', 'ESOCKET', 'ECONNREFUSED'].includes(code) || /timeout|ECONNREFUSED|ECONNRESET/i.test(resp))
-    return 'нет связи с почтовым сервером — проверьте SMTP_HOST и SMTP_PORT (обычно 465). Иногда порт закрывает антивирус или провайдер';
+    return 'нет связи с почтовым сервером — проверьте интернет, SMTP_HOST и SMTP_PORT. Часто почту не пропускает VPN, антивирус или провайдер';
   if (/certificate|self.signed|CERT/i.test(resp)) return 'ошибка сертификата почтового сервера (так бывает, когда антивирус проверяет защищённые соединения)';
   if (err?.responseCode && err.responseCode >= 500) return `почтовый сервер отклонил письмо: ${resp.slice(0, 160)}`;
   return resp.slice(0, 200);
@@ -75,7 +105,7 @@ export function mailErrorText(e: unknown) {
 export async function verifyMail() {
   const c = smtpConf();
   if (!c) return false;
-  await transporter(c).verify();
+  await viaSmtp(c, (t) => t.verify());
   return true;
 }
 
@@ -83,7 +113,7 @@ export async function verifyMail() {
 export async function sendMail(to: string | string[], subject: string, text: string, html?: string) {
   const c = smtpConf();
   if (!c) return false;
-  await transporter(c).sendMail({ from: c.from, to, subject, text, html });
+  await viaSmtp(c, (t) => t.sendMail({ from: c.from, to, subject, text, html }));
   return true;
 }
 

@@ -7,7 +7,7 @@ import { useEffect, useRef, useState } from 'react';
 import { WaitHint, useHydrated } from '@/components/useHydrated';
 import { GRADES, gradeLabel } from '@/lib/brand';
 
-type CodeInfo = { email: string; wait?: number; devCode?: string; mail?: boolean; already?: boolean };
+type CodeInfo = { email: string; wait?: number; devCode?: string; mail?: boolean; mailError?: string; already?: boolean };
 
 async function post<T = Record<string, unknown>>(url: string, data: unknown): Promise<T> {
   const res = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(data) });
@@ -95,18 +95,34 @@ function CodeStep({
     <form ref={formRef} onSubmit={submit} method="post" className="grid grid-cols-1 gap-4">
       <div className="flex items-start gap-3 rounded-2xl bg-tint p-4 text-[15px] text-brand-800">
         <MailCheck size={22} className="mt-0.5 shrink-0" />
-        <p>
-          {state.already ? 'Мы уже отправили код на ' : 'Отправили код на '}
-          <b className="font-medium break-all">{state.email}</b>. Введите 6 цифр из письма. Не видите письмо — загляните в папку «Спам».
-        </p>
+        {state.mailError ? (
+          <p>
+            Письмо с кодом на <b className="font-medium break-all">{state.email}</b> пока не отправилось.
+          </p>
+        ) : (
+          <p>
+            {state.already ? 'Мы уже отправили код на ' : 'Отправили код на '}
+            <b className="font-medium break-all">{state.email}</b>. Введите 6 цифр из письма. Не видите письмо — загляните в папку «Спам».
+          </p>
+        )}
       </div>
-      {state.devCode && (
+      {state.mailError && (
+        <p className="rounded-xl bg-[#fff4cc] px-4 py-3 text-[14px] text-ink">
+          {state.mailError} Нажмите «Отправить код ещё раз» чуть позже — или попросите код у владельца сайта: он записан в окне сервера.
+          {state.devCode && (
+            <span className="mt-1 block">
+              Код для проверки (виден только при запуске на своём компьютере): <b className="font-mono text-[15px]">{state.devCode}</b>
+            </span>
+          )}
+        </p>
+      )}
+      {state.devCode && !state.mailError && (
         <p className="rounded-xl bg-[#fff4cc] px-4 py-3 text-[14px] text-ink">
           Почта на сайте ещё не настроена, поэтому письмо не отправлено. Код для проверки: <b className="font-mono text-[15px]">{state.devCode}</b>
           <span className="block text-ink-2">Его видно только при запуске на своём компьютере. Как включить письма — в README, раздел «Почта».</span>
         </p>
       )}
-      {state.mail === false && !state.devCode && (
+      {state.mail === false && !state.devCode && !state.mailError && (
         <p className="rounded-xl bg-[#fff4cc] px-4 py-3 text-[14px] text-ink">
           Почта на сайте ещё не настроена, письмо не отправлено. Код записан в окне сервера — его может посмотреть владелец сайта.
         </p>
@@ -246,7 +262,7 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
       )}
       <label className="field">
         Email
-        <input ref={emailRef} className="input" name="email" type="email" required autoComplete="email" defaultValue={saved.email} placeholder="you@example.ru" />
+        <input ref={emailRef} className="input" name="email" type="email" suppressHydrationWarning required autoComplete="email" defaultValue={saved.email} placeholder="you@example.ru" />
       </label>
       <label className="field">
         <span className="flex items-center justify-between">
@@ -271,6 +287,7 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
           className="input"
           name="password"
           type="password"
+          suppressHydrationWarning
           required
           minLength={mode === 'register' ? 8 : 1}
           maxLength={200}
@@ -343,7 +360,7 @@ export function ResetForm() {
       >
         <label className="field">
           Новый пароль
-          <input ref={pwRef} className="input" type="password" required minLength={8} maxLength={200} autoComplete="new-password" placeholder="Не короче 8 символов" />
+          <input ref={pwRef} className="input" type="password" suppressHydrationWarning required minLength={8} maxLength={200} autoComplete="new-password" placeholder="Не короче 8 символов" />
         </label>
       </CodeStep>
     );
@@ -367,7 +384,7 @@ export function ResetForm() {
     >
       <label className="field">
         Email аккаунта
-        <input className="input" type="email" required autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.ru" autoFocus />
+        <input className="input" type="email" suppressHydrationWarning required autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.ru" autoFocus />
       </label>
       <ErrorBox text={error} />
       <button type="submit" className="btn btn-primary btn-lg mt-2 w-full" disabled={busy || !ready}>

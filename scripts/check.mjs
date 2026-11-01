@@ -376,22 +376,25 @@ export function smtpConf(env) {
   if (hp) [host, port] = [hp[1], port || Number(hp[2])];
   host = host.replace(/[/].*$/, '') || MAIL_HOSTS.find(([re]) => re.test(user))?.[1] || '';
   if (!user || !pass || !host) return null;
+  const fixed = port > 0 || Boolean(clean(env.SMTP_SECURE)); // порт указан явно — запасной не пробуем
   port ||= 465;
   const sec = clean(env.SMTP_SECURE);
   const secure = sec ? !/^(0|false|no|нет)$/i.test(sec) : port === 465;
   if (/gmail/i.test(host)) pass = pass.replace(/\s+/g, '');
-  return { host, port, secure, user, pass };
+  return { host, port, secure, user, pass, fixed };
 }
 
 /** Понятная причина ошибки почты — те же тексты, что на сайте (src/lib/mail.ts: mailErrorText). */
 function mailError(e) {
   const code = String(e?.code || '');
   const resp = String(e?.response || e?.message || e);
+  if (/access rights to this service/i.test(resp))
+    return 'Яндекс не пускает программы к этому ящику: в Яндекс Почте откройте ⚙ → «Все настройки» → «Почтовые программы» и включите IMAP и «Пароли приложений и OAuth-токены»';
   if (code === 'EAUTH' || e?.responseCode === 535 || e?.responseCode === 534)
     return 'неверный логин или пароль почты (SMTP_USER, SMTP_PASS). Для Яндекса, Mail.ru и Gmail нужен «пароль приложения», а не обычный пароль от почты';
   if (code === 'EDNS' || /ENOTFOUND|EAI_AGAIN/.test(resp)) return 'адрес почтового сервера SMTP_HOST не найден — проверьте, нет ли опечатки';
   if (['ETIMEDOUT', 'ECONNECTION', 'ESOCKET', 'ECONNREFUSED'].includes(code) || /timeout|ECONNREFUSED|ECONNRESET/i.test(resp))
-    return 'нет связи с почтовым сервером — проверьте SMTP_HOST и SMTP_PORT (обычно 465). Иногда порт закрывает антивирус или провайдер';
+    return 'нет связи с почтовым сервером — проверьте интернет, SMTP_HOST и SMTP_PORT. Часто почту не пропускает VPN, антивирус или провайдер';
   if (/certificate|self.signed|CERT/i.test(resp)) return 'ошибка сертификата почтового сервера (так бывает, когда антивирус проверяет защищённые соединения)';
   return resp.slice(0, 200);
 }
@@ -407,22 +410,40 @@ export async function checkMail(env) {
     }
     return false;
   }
-  try {
-    const nodemailer = (await import('nodemailer')).default;
+  const nodemailer = (await import('nodemailer')).default;
+  const tryPort = async (port, secure) => {
     const t = nodemailer.createTransport({
       host: c.host,
-      port: c.port,
-      secure: c.secure,
+      port,
+      secure,
+      requireTLS: !secure,
       auth: { user: c.user, pass: c.pass },
-      connectionTimeout: 15000,
-      greetingTimeout: 15000,
+      connectionTimeout: 10000,
+      greetingTimeout: 10000,
       socketTimeout: 20000,
     });
-    await t.verify();
-    t.close();
+    try {
+      await t.verify();
+    } finally {
+      t.close();
+    }
+  };
+  const netErr = (e) => /ETIMEDOUT|ECONNECTION|ESOCKET|ECONNREFUSED|ECONNRESET|EHOSTUNREACH|ENETUNREACH|timeout/i.test(`${e?.code ?? ''} ${e?.message ?? ''}`);
+  try {
+    await tryPort(c.port, c.secure);
     log.ok(`Почта: вход в ${c.host} выполнен — коды будут приходить в письмах от ${c.user}.`);
     return true;
   } catch (e) {
+    // Порт 465 закрыт (VPN, антивирус, провайдер) — сайт сам попробует 587, проверим и его
+    if (netErr(e) && !c.fixed && c.port === 465) {
+      try {
+        await tryPort(587, false);
+        log.ok(`Почта: вход в ${c.host} выполнен через порт 587 (порт 465 не отвечает) — коды будут приходить в письмах от ${c.user}.`);
+        return true;
+      } catch (e2) {
+        if (!netErr(e2)) e = e2; // через 587 связь есть, но ошибка другая (например, пароль) — покажем её
+      }
+    }
     log.bad(`Почта: ${mailError(e)}.`);
     return false;
   }

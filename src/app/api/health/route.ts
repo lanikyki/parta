@@ -14,5 +14,6 @@ export async function GET() {
     storage: process.env.DATABASE_URL ? 'postgres' : 'local',
     video: livekitConfigured(),
     ai: aiConfigured(),
+    dev: process.env.NODE_ENV !== 'production', // запущен режим разработки (start-windows) — его не стоит показывать по ссылке
   });
 }

@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import { cookies } from 'next/headers';
-import { RESEND_SEC, type Purpose, cancelCode, issueCode } from './codes';
-import { fail, json } from './http';
+import { RESEND_SEC, type Purpose, issueCode } from './codes';
+import { json } from './http';
 import { mailErrorText, sendCode } from './mail';
 
 const dev = () => process.env.NODE_ENV !== 'production';
@@ -17,10 +17,21 @@ export async function sendCodeResponse(email: string, purpose: Purpose, payload?
     const sent = await sendCode(email, r.code, purpose);
     return json({ ok: true, step: 'code', email, wait: RESEND_SEC, mail: sent, devCode: !sent && dev() ? r.code : undefined });
   } catch (e) {
-    await cancelCode(email, purpose);
+    // Письмо не ушло (нет связи с почтой и т. п.), но код действует: он записан в окне сервера,
+    // а человек может запросить письмо ещё раз — регистрация не обрывается.
     const why = mailErrorText(e);
-    console.error(`[Почта] Письмо на ${email} не отправлено: ${why}\n        (${String((e as Error)?.message ?? e).slice(0, 300)})`);
-    return fail(dev() ? `Не удалось отправить письмо: ${why}` : 'Не удалось отправить письмо с кодом. Попробуйте ещё раз через пару минут.', 502);
+    console.error(
+      `[Почта] Письмо на ${email} не отправлено: ${why}\n        (${String((e as Error)?.message ?? e).slice(0, 300)})\n        Код для ${email}: ${r.code} — можно продиктовать (действует 15 минут)`,
+    );
+    return json({
+      ok: true,
+      step: 'code',
+      email,
+      wait: RESEND_SEC,
+      mail: false,
+      mailError: dev() ? `Письмо не отправилось: ${why}.` : 'Письмо пока не отправилось.',
+      devCode: dev() ? r.code : undefined,
+    });
   }
 }
 
