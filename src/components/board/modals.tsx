@@ -4,6 +4,7 @@ import katex from 'katex';
 import { X } from 'lucide-react';
 import { useMemo, useRef, useState } from 'react';
 import { tryCompile } from '@/lib/board/mathexpr';
+import { KATEX_LIMITS } from '@/lib/mathtext';
 import { GRAPH_COLORS, GraphView } from './render';
 
 function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
@@ -57,7 +58,7 @@ const SNIPPETS: [string, string, number?][] = [
 export function FormulaModal({ onClose, onInsert }: { onClose: () => void; onInsert: (latex: string) => void }) {
   const [src, setSrc] = useState('x_{1,2} = \\frac{-b \\pm \\sqrt{D}}{2a}');
   const ref = useRef<HTMLTextAreaElement>(null);
-  const html = useMemo(() => katex.renderToString(src || '\\square', { throwOnError: false, displayMode: true, output: 'html' }), [src]);
+  const html = useMemo(() => katex.renderToString(src || '\\square', { throwOnError: false, displayMode: true, output: 'html', ...KATEX_LIMITS }), [src]);
   const insert = (snippet: string, back = 0) => {
     const el = ref.current;
     if (!el) return;
