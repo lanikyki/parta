@@ -2,7 +2,7 @@ import { getUser } from '@/lib/auth';
 import { q } from '@/lib/db';
 import { body, fail, json, rateLimit, str } from '@/lib/http';
 import { uid } from '@/lib/ids';
-import { clientIp, lessonByCode } from '@/lib/lessons';
+import { clientIp, guestName, lessonByCode } from '@/lib/lessons';
 
 type Ctx = { params: Promise<{ code: string }> };
 
@@ -27,7 +27,7 @@ export async function POST(req: Request, { params }: Ctx) {
   await q('insert into chat_messages (id, lesson_id, author, text) values ($1, $2, $3, $4) on conflict (id) do nothing', [
     id,
     lesson.id,
-    (await getUser())?.name || str(b.author, 60) || 'Гость',
+    (await getUser())?.name || guestName(str(b.author, 60), lesson.owner_name),
     text,
   ]);
   return json({ ok: true, id });

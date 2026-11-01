@@ -47,20 +47,20 @@ export function TaskGenerator() {
       <p className="mt-2 text-[15px] text-ink-2">Подборка задач по теме — для урока или домашнего задания.</p>
       <form onSubmit={onSubmit} className="mt-4 grid grid-cols-1 gap-3">
         <input className="input" name="topic" required maxLength={200} placeholder="Тема, например: теорема Виета" />
-        <div className="grid grid-cols-3 gap-2">
-          <select className="input pr-8 pl-3" name="grade" defaultValue="9" aria-label="Класс">
+        <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.25fr)_minmax(0,0.95fr)] gap-2">
+          <select className="input pr-7 pl-3 [background-position:right_6px_center]" name="grade" defaultValue="9" aria-label="Класс">
             {GRADES.map((g) => (
               <option key={g} value={g}>
                 {/^\d+$/.test(g) ? `${g} кл.` : gradeLabel(g)}
               </option>
             ))}
           </select>
-          <select className="input pr-8 pl-3" name="level" defaultValue="средний" aria-label="Уровень">
+          <select className="input pr-7 pl-3 [background-position:right_6px_center]" name="level" defaultValue="средний" aria-label="Уровень">
             <option value="база">База</option>
             <option value="средний">Средний</option>
             <option value="сложный">Сложный</option>
           </select>
-          <select className="input pr-8 pl-3" name="count" defaultValue="5" aria-label="Количество">
+          <select className="input pr-7 pl-3 [background-position:right_6px_center]" name="count" defaultValue="5" aria-label="Количество">
             {[3, 5, 7, 10].map((n) => (
               <option key={n} value={n}>
                 {n} шт.

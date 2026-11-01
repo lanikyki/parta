@@ -3,7 +3,7 @@ import { getUser } from '@/lib/auth';
 import { q } from '@/lib/db';
 import { logEvent } from '@/lib/events';
 import { body, clientIp, fail, json, str } from '@/lib/http';
-import { lessonByCode } from '@/lib/lessons';
+import { guestName, lessonByCode } from '@/lib/lessons';
 import { createToken, livekitConfigured } from '@/lib/livekit';
 import { linkStudent } from '@/lib/messages';
 
@@ -14,7 +14,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ code: s
     return fail('Видеосервер не настроен: укажите LIVEKIT_URL, LIVEKIT_API_KEY и LIVEKIT_API_SECRET', 503);
   const user = await getUser();
   const b = await body<{ name: string }>(req);
-  const name = user?.name || str(b.name, 60) || 'Гость';
+  const name = user?.name || guestName(str(b.name, 60), lesson.owner_name);
   const isHost = Boolean(user && user.id === lesson.owner_id);
   const suffix = crypto.randomBytes(4).toString('hex');
   const identity = user ? `u-${user.id.slice(0, 8)}-${suffix}` : `g-${suffix}`;

@@ -3,12 +3,15 @@ import { EMAIL_RE, regOwner, sendCodeResponse } from '@/lib/authflow';
 import { cleanGrade } from '@/lib/brand';
 import { cleanupLater } from '@/lib/codes';
 import { one } from '@/lib/db';
-import { body, clientIp, fail, rateLimit, str } from '@/lib/http';
+import { body, clientIp, fail, limited, rateLimit, str } from '@/lib/http';
 import { isInviteCode } from '@/lib/ids';
 
 /** Шаг 1 регистрации: проверяем анкету и отправляем код на почту. Аккаунт появится после ввода кода. */
 export async function POST(req: Request) {
-  if (!rateLimit(`reg:${clientIp(req)}`, 15, 3600e3)) return fail('Слишком много попыток, попробуйте через час', 429);
+  // В лимит идут только отправленные письма с кодом (ошибки в анкете не считаются): так целый класс за одним
+  // роутером спокойно зарегистрируется, а засыпать чужие ящики письмами всё равно не выйдет.
+  const ip = clientIp(req);
+  if (limited(`reg:${ip}`, 20, 3600e3) || !rateLimit(`reg-all:${ip}`, 120, 3600e3)) return fail('Слишком много попыток, попробуйте через час', 429);
   const b = await body<{ role: string; name: string; email: string; password: string; grade: string; invite: string }>(req);
   const role = b.role === 'tutor' ? 'tutor' : 'student';
   const name = str(b.name, 60).replace(/\s+/g, ' ');
@@ -22,6 +25,7 @@ export async function POST(req: Request) {
   if (password.length > 200) return fail('Слишком длинный пароль');
   if (await one('select 1 from users where email = $1', [email]))
     return fail('Этот email уже зарегистрирован. Войдите или восстановите пароль.', 409);
+  rateLimit(`reg:${ip}`, 20, 3600e3);
   cleanupLater();
   const owner = await regOwner();
   return sendCodeResponse(email, 'register', { role, name, grade, password_hash: hashPassword(password), owner, invite });

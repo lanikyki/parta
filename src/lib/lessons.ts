@@ -25,3 +25,17 @@ export async function lessonByCode(code: string) {
 }
 
 export { clientIp } from './http';
+
+// Латинские буквы, похожие на русские: «Аннa» с латинской «a» не должна обойти проверку
+const LOOKALIKE: Record<string, string> = { a: 'а', b: 'в', c: 'с', e: 'е', h: 'н', k: 'к', m: 'м', o: 'о', p: 'р', t: 'т', x: 'х', y: 'у', ё: 'е', й: 'и' };
+const norm = (s: string) =>
+  s
+    .toLowerCase()
+    .replace(/[a-zё]/g, (c) => LOOKALIKE[c] ?? c)
+    .replace(/[^a-zа-я0-9]/g, '');
+
+/** Имя гостя в уроке. Назваться как репетитор урока нельзя — иначе легко выдать себя за него в чате и на видео. */
+export function guestName(raw: string, ownerName: string) {
+  const name = raw.replace(/\s+/g, ' ').trim() || 'Гость';
+  return norm(name) && norm(name) === norm(ownerName) ? `${name} (гость)` : name;
+}

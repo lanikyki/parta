@@ -7,15 +7,24 @@ import { getUser } from '@/lib/auth';
 import { q } from '@/lib/db';
 import { mailConfigured } from '@/lib/mail';
 import { ensureInviteCode, listContacts, listThreads, supportEnabled } from '@/lib/messages';
+import { firstParams } from '@/lib/nav';
 
 export const metadata: Metadata = { title: 'Сообщения' };
 
-type Sp = Promise<Record<string, string | undefined>>;
+type Sp = Promise<Record<string, string | string[] | undefined>>;
 
 export default async function MessagesPage({ searchParams }: { searchParams: Sp }) {
   const user = await getUser();
-  if (!user) redirect('/login?next=/messages');
-  const sp = await searchParams;
+  const sp = await firstParams(searchParams);
+  const open = { thread: sp.t, with: sp.with, support: sp.support === '1' };
+  if (!user) {
+    // Ссылка из письма («ответьте в переписке») должна открыть нужную переписку и после входа
+    const back = new URLSearchParams();
+    if (open.thread) back.set('t', open.thread);
+    if (open.with) back.set('with', open.with);
+    if (open.support) back.set('support', '1');
+    redirect(`/login?next=${encodeURIComponent(`/messages${back.size ? `?${back}` : ''}`)}`);
+  }
   const tutor = user.role === 'tutor';
   const [threads, contacts, invite, lessons] = await Promise.all([
     listThreads(user),
@@ -42,7 +51,7 @@ export default async function MessagesPage({ searchParams }: { searchParams: Sp 
           support={supportEnabled()}
           invite={invite}
           lessons={lessons.map((l) => ({ code: l.code, title: l.title, startsAt: l.starts_at ? new Date(l.starts_at).toISOString() : null }))}
-          open={{ thread: sp.t, with: sp.with, support: sp.support === '1' }}
+          open={open}
           mail={mailConfigured()}
         />
       </main>

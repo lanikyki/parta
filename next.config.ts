@@ -22,10 +22,25 @@ const nextConfig: NextConfig = {
   serverExternalPackages: ['@electric-sql/pglite', 'pg', 'nodemailer'],
   poweredByHeader: false,
   devIndicators: false,
-  // Режим разработки открывается по ссылке Cloudflare (npm run share) и по адресу в домашней сети
-  allowedDevOrigins: ['*.trycloudflare.com', '*.local', '192.168.*.*', '10.*.*.*', '172.*.*.*', ...lanAddresses],
+  // Режим разработки открывается по ссылке туннеля (Tuna, Cloudflare и др.) и по адресу в домашней сети
+  allowedDevOrigins: [
+    '*.trycloudflare.com',
+    '*.ru.tuna.am',
+    '*.nl.tuna.am',
+    '*.tunnelmole.net',
+    '*.a.free.pinggy.link',
+    '*.local',
+    '192.168.*.*',
+    '10.*.*.*',
+    '172.*.*.*',
+    ...lanAddresses,
+  ],
   async headers() {
-    return [{ source: '/:path*', headers: securityHeaders }];
+    return [
+      { source: '/:path*', headers: securityHeaders },
+      // Загруженные картинки: даже если открыть файл напрямую, никакой код из него не выполнится
+      { source: '/api/assets/:id', headers: [{ key: 'Content-Security-Policy', value: "default-src 'none'; frame-ancestors 'self'; sandbox" }] },
+    ];
   },
 };
 

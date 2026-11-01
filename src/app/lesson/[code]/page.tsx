@@ -5,12 +5,15 @@ import { aiConfigured } from '@/lib/ai';
 import { getUser } from '@/lib/auth';
 import { lessonByCode } from '@/lib/lessons';
 import { livekitConfigured } from '@/lib/livekit';
+import { og } from '@/lib/og';
 
 type Props = { params: Promise<{ code: string }> };
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const lesson = await lessonByCode((await params).code);
-  return { title: lesson ? lesson.title : 'Урок не найден', robots: { index: false } };
+  if (!lesson) return { title: 'Урок не найден', robots: { index: false } };
+  const description = 'Ссылка на онлайн-урок: видеосвязь, общая доска и чат прямо в браузере, без установки программ.';
+  return { title: lesson.title, description, robots: { index: false }, openGraph: og(`Урок «${lesson.title}»`, description) };
 }
 
 export default async function LessonPage({ params }: Props) {

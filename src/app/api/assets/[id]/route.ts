@@ -10,6 +10,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       'content-type': row.mime,
       'cache-control': 'public, max-age=31536000, immutable',
       'x-content-type-options': 'nosniff',
+      'content-security-policy': "default-src 'none'; sandbox",
     },
   });
 }

@@ -3,16 +3,18 @@
 import { Check, Link2 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
+import { shareOrigin, usePublicOrigin } from '@/lib/publicOrigin';
 
 /** Кнопка «Скопировать ссылку-приглашение» для репетитора. */
 export function InviteLink({ code, className = '', label = 'Скопировать ссылку-приглашение' }: { code: string; className?: string; label?: string }) {
   const [done, setDone] = useState(false);
+  usePublicOrigin();
   return (
     <button
       type="button"
       className={`btn btn-soft h-auto min-h-11 py-2.5 text-center leading-tight whitespace-normal ${className}`}
       onClick={async () => {
-        const url = `${location.origin}/invite/${code}`;
+        const url = `${shareOrigin()}/invite/${code}`;
         try {
           await navigator.clipboard.writeText(url);
         } catch {
