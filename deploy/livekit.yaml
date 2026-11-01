@@ -1,0 +1,18 @@
+# Настройки видеосервера LiveKit для своего сервера.
+# Ключи берутся из переменной LIVEKIT_KEYS (см. docker-compose.yml), здесь их писать не нужно.
+port: 7880
+rtc:
+  tcp_port: 7881
+  port_range_start: 50000
+  port_range_end: 60000
+  # Сервер сам узнает свой внешний IP — нужно для работы видео через интернет
+  use_external_ip: true
+# Встроенный TURN помогает, когда у ученика строгая сеть (школа, офис, мобильный оператор)
+turn:
+  enabled: true
+  udp_port: 3478
+room:
+  empty_timeout: 300
+  max_participants: 30
+logging:
+  level: info
