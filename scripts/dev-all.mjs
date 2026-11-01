@@ -155,9 +155,10 @@ async function findCloudflared() {
   }
 }
 
-function shareNotes(url, env) {
+function shareNotes(url, env, via) {
   const line = '='.repeat(Math.max(48, url.length + 22));
   say(`\n${line}\n  Ссылка для друга:  ${url}\n${line}`);
+  if (via === 'pinggy') say('  • По этой ссылке сначала откроется страница Pinggy на английском — нужно нажать «Enter site». Ссылка работает 60 минут.');
   say('  • Работает, пока открыто это окно и включён компьютер. При следующем запуске ссылка будет другой.');
   say('  • Сами тоже откройте сайт по этой ссылке (войти придётся заново) — тогда «Скопировать ссылку»');
   say('    на урок даст адрес, который откроется у друга.');
@@ -219,40 +220,175 @@ async function share(env, children, stop) {
   say('\nПроверка настроек:');
   await runChecks({ brief: true, autofill: true });
 
-  const bin = await findCloudflared();
-  if (!bin) {
-    say(`\nСайт работает только на этом компьютере: ${SITE}`);
+  // Временная ссылка: Cloudflare, а если не вышло — запасные сервисы (SHARE_VIA в .env.local — с какого начать)
+  fs.mkdirSync(TOOLS, { recursive: true });
+  const link = await openTunnel(children, (env.SHARE_VIA || '').trim().toLowerCase());
+  if (!link) {
+    say(`\nСсылку получить не удалось. Сайт работает только на этом компьютере: ${SITE}`);
+    say('Что попробовать: подождать 10–15 минут и запустить share-windows.bat снова; включить или выключить VPN;');
+    say('разрешить программы cloudflared, node и ssh в антивирусе. Подробности — в папке tools (файлы *.log).\n');
     return;
   }
-  say('\nОткрываю доступ из интернета (Cloudflare)…');
-  fs.mkdirSync(TOOLS, { recursive: true });
-  const logFile = path.join(TOOLS, 'cloudflared.log');
-  fs.writeFileSync(logFile, '');
-  const cf = spawn(bin, ['tunnel', '--no-autoupdate', '--url', SITE], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
-  children.push(cf);
-  let url = '';
-  const onData = (buf) => {
-    const text = buf.toString();
-    fs.appendFileSync(logFile, text);
-    const m = !url && text.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/);
-    if (!m) return;
-    url = m[0];
-    // Новому адресу нужно несколько секунд, чтобы заработать
-    (async () => {
-      await sleep(3000);
-      const ok = await waitUp(`${url}/api/health`, 40000);
-      shareNotes(url, env);
-      if (ok) openBrowser(url);
-      else say('Ссылка может заработать не сразу — подождите минуту и обновите страницу.\n');
-    })();
-  };
-  cf.stdout.on('data', onData);
-  cf.stderr.on('data', onData);
-  cf.on('error', (e) => say(`cloudflared не запустился: ${e.message}`));
-  cf.on('exit', (code) => say(`\nДоступ из интернета закрылся (cloudflared, код ${code}). Подробности — tools/cloudflared.log`));
-  setTimeout(() => {
-    if (!url) say('Ссылка пока не появилась… Подробности — в tools/cloudflared.log (иногда мешает антивирус или блокировка Cloudflare у провайдера).');
-  }, 45000);
+  link.proc.on('exit', (code) =>
+    say(`\nДоступ из интернета закрылся (${link.name}, код ${code}). Чтобы получить новую ссылку, закройте это окно и запустите share-windows.bat снова.`),
+  );
+  // Новому адресу нужно несколько секунд, чтобы заработать
+  await sleep(3000);
+  const ok = await waitUp(`${link.url}/api/health`, 40000);
+  shareNotes(link.url, env, link.id);
+  if (ok) openBrowser(link.url);
+  else say('Ссылка может заработать не сразу — подождите минуту и обновите страницу.\n');
+}
+
+// --- Сервисы временных ссылок: по очереди Cloudflare → Tunnelmole → Pinggy ---
+// «api.trycloudflare.com» — служебный адрес Cloudflare из сообщений об ошибках, а не ссылка.
+const CF_LINK = /https:\/\/(?!api\.)[a-z0-9]+(?:-[a-z0-9]+)+\.trycloudflare\.com/;
+const TM_LINK = /https:\/\/[a-z0-9-]+\.tunnelmole\.net/;
+const PINGGY_LINK = /https:\/\/[a-z0-9]+(?:-[a-z0-9]+)+\.[a-z0-9.-]*pinggy[a-z0-9-]*\.(?:link|net|online|io)/;
+
+/** Tunnelmole — запасной сервис ссылок: программа на Node.js, ставится в папку tools один раз. */
+function findTunnelmole() {
+  const cli = path.join(TOOLS, 'tunnelmole', 'node_modules', 'tunnelmole', 'dist', 'bin', 'tunnelmole.js');
+  if (fs.existsSync(cli)) return cli;
+  say('Скачиваю Tunnelmole — запасную программу для ссылки (один раз, около 20 МБ)…');
+  fs.mkdirSync(path.join(TOOLS, 'tunnelmole'), { recursive: true });
+  const cmd = 'npm install --prefix tools/tunnelmole --no-save --no-audit --no-fund --loglevel=error tunnelmole@2';
+  const r = spawnSync(cmd, { stdio: 'inherit', shell: true });
+  if (r.status === 0 && fs.existsSync(cli)) return cli;
+  say('Не получилось скачать Tunnelmole.');
+  return null;
+}
+
+function hasSsh() {
+  const r = spawnSync('ssh', ['-V'], { stdio: 'ignore', windowsHide: true });
+  if (!r.error && r.status === 0) return true;
+  say('Pinggy не подходит: на компьютере нет программы ssh.');
+  return false;
+}
+
+const TUNNELS = [
+  {
+    id: 'cloudflare',
+    name: 'Cloudflare',
+    log: 'cloudflared.log',
+    re: CF_LINK,
+    tries: 2,
+    start: async () => {
+      const bin = await findCloudflared();
+      return bin && { bin, args: ['tunnel', '--no-autoupdate', '--url', SITE] };
+    },
+  },
+  {
+    id: 'tunnelmole',
+    name: 'Tunnelmole',
+    log: 'tunnelmole.log',
+    re: TM_LINK,
+    tries: 1,
+    start: async () => {
+      const cli = findTunnelmole();
+      return cli && { bin: process.execPath, args: [cli, '3000'], env: { ...process.env, TUNNELMOLE_TELEMETRY: '0' } };
+    },
+  },
+  {
+    id: 'pinggy',
+    name: 'Pinggy',
+    log: 'pinggy.log',
+    re: PINGGY_LINK,
+    tries: 1,
+    start: async () => {
+      if (!hasSsh()) return null;
+      const opts = ['StrictHostKeyChecking=accept-new', 'BatchMode=yes', 'ServerAliveInterval=30', 'ServerAliveCountMax=3', 'ExitOnForwardFailure=yes'];
+      return { bin: 'ssh', args: ['-T', '-p', '443', ...opts.flatMap((o) => ['-o', o]), '-R0:localhost:3000', 'a.pinggy.io'] };
+    },
+  },
+];
+
+/** Запускает программу-туннель и ждёт в её сообщениях ссылку. */
+function waitLink(how, re, logFile, ms) {
+  return new Promise((resolve) => {
+    let log = '';
+    let done = false;
+    let proc;
+    const finish = (url, extra = {}) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      if (!url) {
+        try {
+          proc?.kill();
+        } catch {}
+      }
+      resolve({ url, proc, log, ...extra });
+    };
+    const timer = setTimeout(() => finish('', { timeout: true }), ms);
+    try {
+      proc = spawn(how.bin, how.args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, env: how.env || process.env });
+    } catch (e) {
+      log = e.message;
+      return finish('');
+    }
+    const onData = (buf) => {
+      const text = buf.toString();
+      fs.appendFileSync(logFile, text);
+      if (done) return;
+      log += text;
+      const m = log.match(re);
+      if (m) finish(m[0]);
+    };
+    proc.stdout.on('data', onData);
+    proc.stderr.on('data', onData);
+    proc.on('error', (e) => {
+      log += `\n${e.message}`;
+      finish('');
+    });
+    proc.on('exit', (code) => {
+      log += `\n(код ${code})`;
+      finish('');
+    });
+  });
+}
+
+/** Понятная причина, почему сервис не выдал ссылку, — по его сообщениям. again: есть ли смысл сразу повторить. */
+function tunnelProblem(r, t) {
+  const log = r.log.replace(/\x1b\[[0-9;]*m/g, '');
+  if (/1015|429|Too Many Requests/i.test(log))
+    return { why: `${t.name} временно не выдаёт новые ссылки — слишком много запусков подряд (бывает, если у провайдера один адрес на много людей). Обычно проходит за 10–15 минут`, again: false };
+  if (/x509|certificate/i.test(log)) return { why: 'мешает антивирус (проверка защищённых соединений) — разрешите эту программу в антивирусе', again: false };
+  if (/ENOENT|EACCES|EPERM|not a valid|cannot execute/i.test(log))
+    return { why: 'программа не запускается (возможно, её заблокировал антивирус). Удалите её из папки tools — она скачается заново', again: false };
+  if (r.timeout) return { why: 'не ответил за минуту — связь с ним плохая (провайдер, VPN или антивирус)', again: false };
+  if (/no such host|server misbehaving|ENOTFOUND|EAI_AGAIN|Could not resolve/i.test(log)) return { why: 'компьютер не нашёл адрес сервиса — проверьте интернет', again: true };
+  if (/timeout|timed out|deadline exceeded|i\/o|refused|reset|dial tcp|EOF/i.test(log))
+    return { why: 'нет связи с сервисом — часто мешает провайдер, VPN или антивирус', again: true };
+  const line = log.split(/\r?\n/).reverse().find((l) => /\bERR\b|failed|error/i.test(l)) || log.split(/\r?\n/).reverse().find((l) => l.trim() && !/^\(код/.test(l));
+  return { why: line ? line.replace(/^\S+\s+(ERR|WRN|INF)\s+/, '').trim().slice(0, 200) : 'неизвестная ошибка', again: true };
+}
+
+/** Получает временную ссылку: по очереди пробует сервисы, начиная с выбранного в SHARE_VIA. */
+async function openTunnel(children, first) {
+  const order = [...TUNNELS].sort((a, b) => Number(first.startsWith(b.id)) - Number(first.startsWith(a.id)));
+  let tried = false;
+  for (const t of order) {
+    say(tried ? `\nПробую другой сервис — ${t.name}…` : `\nОткрываю доступ из интернета (${t.name})…`);
+    tried = true;
+    const how = await t.start();
+    if (!how) continue;
+    const logFile = path.join(TOOLS, t.log);
+    fs.writeFileSync(logFile, '');
+    for (let attempt = 1; attempt <= t.tries; attempt++) {
+      if (attempt > 1) say(`Пробую ${t.name} ещё раз…`);
+      const r = await waitLink(how, t.re, logFile, 60000);
+      if (r.url) {
+        children.push(r.proc);
+        return { url: r.url, proc: r.proc, name: t.name, id: t.id };
+      }
+      const p = tunnelProblem(r, t);
+      say(`${t.name} не выдал ссылку: ${p.why}.`);
+      if (!p.again) break;
+      await sleep(5000);
+    }
+  }
+  return null;
 }
 
 async function main() {
