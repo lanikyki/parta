@@ -4,6 +4,7 @@ import { ArrowLeft, CheckCheck, LifeBuoy, Loader2, MessageCircle, PenSquare, Sen
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { Contact, Msg, ThreadItem } from '@/lib/messages';
 import { renderMarkdown } from '@/lib/mathtext';
+import { shareOrigin, usePublicOrigin } from '@/lib/publicOrigin';
 import { InviteLink } from './InviteLink';
 import { UNREAD_EVENT } from './MessagesLink';
 
@@ -450,6 +451,7 @@ function Chat({
   onSent: (threadId: string, m: Msg) => void;
   onRead: (threadId: string) => void;
 }) {
+  usePublicOrigin();
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const [seen, setSeen] = useState(0);
   const [more, setMore] = useState(false);
@@ -563,7 +565,7 @@ function Chat({
 
   const insertLesson = (l: LessonLink) => {
     const when = lessonWhen(l.startsAt);
-    const line = `Урок «${l.title}»${when ? `, ${when}` : ''}: ${location.origin}/lesson/${l.code}`;
+    const line = `Урок «${l.title}»${when ? `, ${when}` : ''}: ${shareOrigin()}/lesson/${l.code}`;
     setDraft((d) => (d.trim() ? `${d.trimEnd()}\n${line}` : line));
     inputRef.current?.focus();
   };
@@ -614,13 +616,13 @@ function Chat({
             </p>
           </div>
         ) : (
-          <ol className="grid gap-1.5">
+          <ol className="grid grid-cols-1 gap-1.5">
             {msgs.map((m, i) => {
               const prev = msgs[i - 1];
               const newDay = !prev || new Date(prev.at).toDateString() !== new Date(m.at).toDateString();
               const showName = groupNames && !m.mine && (newDay || prev?.author !== m.author || prev?.mine);
               return (
-                <li key={m.id} className="grid gap-1.5">
+                <li key={m.id} className="grid min-w-0 grid-cols-1 gap-1.5">
                   {newDay && (
                     <span className="my-2 justify-self-center rounded-full bg-white px-3 py-1 text-[13px] text-ink-3 shadow-[inset_0_0_0_1px_var(--color-line)]">
                       {dayLabel(m.at)}
@@ -628,7 +630,7 @@ function Chat({
                   )}
                   <div className={`flex ${m.mine ? 'justify-end' : 'justify-start'} ${!newDay && prev && prev.mine !== m.mine ? 'mt-1.5' : ''}`}>
                     <div
-                      className={`max-w-[min(85%,560px)] rounded-[18px] px-3.5 py-2 [overflow-wrap:anywhere] ${
+                      className={`max-w-[min(85%,560px)] min-w-0 rounded-[18px] px-3.5 py-2 [overflow-wrap:anywhere] ${
                         m.mine ? 'msg-mine rounded-br-md bg-brand text-white' : 'rounded-bl-md bg-white text-ink shadow-[inset_0_0_0_1px_var(--color-line)]'
                       }`}
                     >
@@ -646,8 +648,8 @@ function Chat({
               );
             })}
             {sending && (
-              <li className="flex justify-end">
-                <div className="max-w-[min(85%,560px)] rounded-[18px] rounded-br-md bg-brand/70 px-3.5 py-2 text-[15px] whitespace-pre-wrap text-white [overflow-wrap:anywhere]">
+              <li className="flex min-w-0 justify-end">
+                <div className="max-w-[min(85%,560px)] min-w-0 rounded-[18px] rounded-br-md bg-brand/70 px-3.5 py-2 text-[15px] whitespace-pre-wrap text-white [overflow-wrap:anywhere]">
                   {sending}
                   <p className="mt-0.5 text-right text-[11px] text-white/75">отправляю…</p>
                 </div>

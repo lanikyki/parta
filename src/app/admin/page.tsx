@@ -15,6 +15,7 @@ import { EVENT_LABELS, type EventKind } from '@/lib/events';
 import { livekitConfigured } from '@/lib/livekit';
 import { mailConfigured } from '@/lib/mail';
 import { supportEnabled } from '@/lib/messages';
+import { firstParams } from '@/lib/nav';
 
 export const metadata: Metadata = { title: 'Админка', robots: { index: false } };
 
@@ -57,18 +58,18 @@ function Stat({ icon, title, value, note }: { icon: React.ReactNode; title: stri
   );
 }
 
-function Events({ rows, showFilterLinks = true }: { rows: EventRow[]; showFilterLinks?: boolean }) {
+function Events({ rows, showFilterLinks = true, compact = false }: { rows: EventRow[]; showFilterLinks?: boolean; compact?: boolean }) {
   if (!rows.length) return <p className="p-5 text-[15px] text-ink-2">Пока ничего не происходило.</p>;
   return (
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[720px] text-left text-[14px]">
+      <table className={`w-full text-left text-[14px] ${compact ? 'min-w-[620px]' : 'min-w-[760px]'}`}>
         <thead className="text-[13px] text-ink-3">
           <tr className="border-b border-line">
             <th className="px-4 py-2.5 font-normal">Когда</th>
             <th className="px-4 py-2.5 font-normal">Кто</th>
             <th className="px-4 py-2.5 font-normal">Что сделал</th>
             <th className="px-4 py-2.5 font-normal">Подробности</th>
-            <th className="px-4 py-2.5 font-normal">IP</th>
+            {!compact && <th className="px-4 py-2.5 font-normal">IP</th>}
           </tr>
         </thead>
         <tbody>
@@ -77,7 +78,7 @@ function Events({ rows, showFilterLinks = true }: { rows: EventRow[]; showFilter
               <td className="px-4 py-2.5 whitespace-nowrap text-ink-2">
                 <LocalTime iso={iso(e.at)} compact />
               </td>
-              <td className="px-4 py-2.5">
+              <td className="max-w-[240px] px-4 py-2.5">
                 {e.user_id && showFilterLinks ? (
                   <Link href={`/admin?tab=events&user=${e.user_id}`} className="font-medium hover:text-brand-700 hover:underline">
                     {e.actor}
@@ -85,13 +86,17 @@ function Events({ rows, showFilterLinks = true }: { rows: EventRow[]; showFilter
                 ) : (
                   <span className="font-medium">{e.actor || 'Гость'}</span>
                 )}
-                {e.email && <span className="block text-[12px] text-ink-3">{e.email}</span>}
+                {e.email && (
+                  <span className="block truncate text-[12px] text-ink-3" title={e.email}>
+                    {e.email}
+                  </span>
+                )}
               </td>
               <td className="px-4 py-2.5 whitespace-nowrap">
                 <span className={`rounded-full px-2.5 py-0.5 text-[13px] ${KIND_STYLE[e.kind] ?? 'bg-mist text-ink-2'}`}>{label(e.kind)}</span>
               </td>
-              <td className="px-4 py-2.5 text-ink-2 [overflow-wrap:anywhere]">{e.detail}</td>
-              <td className="px-4 py-2.5 font-mono text-[12px] whitespace-nowrap text-ink-3">{e.ip}</td>
+              <td className="min-w-[200px] px-4 py-2.5 text-ink-2 [overflow-wrap:anywhere]">{e.detail}</td>
+              {!compact && <td className="px-4 py-2.5 font-mono text-[12px] whitespace-nowrap text-ink-3">{e.ip}</td>}
             </tr>
           ))}
         </tbody>
@@ -102,7 +107,7 @@ function Events({ rows, showFilterLinks = true }: { rows: EventRow[]; showFilter
 
 function Lead({ l }: { l: LeadRow }) {
   return (
-    <li className={`flex flex-col gap-3 rounded-2xl p-4 sm:flex-row sm:items-start ${l.done_at ? 'bg-mist text-ink-2' : 'bg-white shadow-[inset_0_0_0_1px_var(--color-line)]'}`}>
+    <li className={`flex min-w-0 flex-col gap-3 rounded-2xl p-4 [overflow-wrap:anywhere] @lg:flex-row @lg:items-start ${l.done_at ? 'bg-mist text-ink-2' : 'bg-white shadow-[inset_0_0_0_1px_var(--color-line)]'}`}>
       <div className="min-w-0 flex-1">
         <p className="flex flex-wrap items-baseline gap-x-3">
           <b className="font-medium text-ink">{l.name}</b>
@@ -119,13 +124,13 @@ function Lead({ l }: { l: LeadRow }) {
   );
 }
 
-export default async function AdminPage({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
+export default async function AdminPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const user = await getUser();
   if (!user) redirect('/login?next=/admin');
   if (!isAdmin(user)) notFound();
-  const sp = await searchParams;
+  const sp = await firstParams(searchParams);
   const tab: Tab = (['users', 'leads', 'events'] as const).find((t) => t === sp.tab) ?? 'overview';
-  const search = (sp.q || '').trim().slice(0, 80);
+  const search = (sp.q || '').replaceAll('\u0000', '').trim().slice(0, 80);
   const kind = sp.kind && sp.kind in EVENT_LABELS ? sp.kind : '';
   const userId = /^[0-9a-f-]{36}$/.test(sp.user || '') ? sp.user! : '';
 
@@ -183,9 +188,9 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
                 Весь журнал
               </Link>
             </h2>
-            <Events rows={events} />
+            <Events rows={events} compact />
           </section>
-          <div className="grid content-start gap-6">
+          <div className="grid min-w-0 content-start gap-6">
             {(s.support_new ?? 0) > 0 && (
               <Link href="/messages" className="flex items-center gap-3 rounded-[20px] bg-brand px-5 py-4 text-white transition-transform hover:-translate-y-0.5">
                 <LifeBuoy size={22} className="shrink-0" />
@@ -198,7 +203,7 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
             <section className="card p-5">
               <h2 className="text-lg font-medium">Новые обращения</h2>
               {leads.length ? (
-                <ul className="mt-3 grid gap-2">
+                <ul className="mt-3 grid gap-2 @container">
                   {leads.map((l) => (
                     <Lead key={l.id} l={l} />
                   ))}
@@ -211,7 +216,7 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
               <h2 className="text-lg font-medium">Новые пользователи</h2>
               <ul className="mt-3 grid gap-2.5 text-[14px]">
                 {fresh.map((u) => (
-                  <li key={u.id} className="flex items-baseline justify-between gap-3">
+                  <li key={u.id} className="flex min-w-0 items-baseline justify-between gap-3">
                     <Link href={`/admin?tab=events&user=${u.id}`} className="min-w-0 truncate hover:text-brand-700">
                       <b className="font-medium">{u.name}</b> <span className="text-ink-3">{u.role === 'tutor' ? 'репетитор' : u.grade ? gradeLabel(u.grade).toLowerCase() : 'ученик'}</span>
                     </Link>
@@ -323,7 +328,7 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
           списка. Сообщения в поддержку от пользователей — в разделе «Сообщения».
         </p>
         {leads.length ? (
-          <ul className="mt-4 grid gap-2">
+          <ul className="mt-4 grid gap-2 @container">
             {leads.map((l) => (
               <Lead key={l.id} l={l} />
             ))}
