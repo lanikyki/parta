@@ -5,10 +5,23 @@ import { AcceptInvite, InviteLink } from '@/components/app/InviteLink';
 import { getUser } from '@/lib/auth';
 import { one } from '@/lib/db';
 import { inviter } from '@/lib/messages';
+import { og } from '@/lib/og';
 
-export const metadata: Metadata = { title: 'Приглашение', robots: { index: false } };
+type Props = { params: Promise<{ code: string }> };
 
-export default async function InvitePage({ params }: { params: Promise<{ code: string }> }) {
+// Превью ссылки в мессенджере: «Анна Смирнова приглашает вас на занятия»
+export async function generateMetadata({ params }: Props): Promise<Metadata> {
+  const tutor = await inviter((await params).code);
+  const description = 'Видеоурок, общая доска и переписка с репетитором — прямо в браузере, без установки программ.';
+  return {
+    title: 'Приглашение',
+    description,
+    robots: { index: false },
+    openGraph: og(tutor ? `${tutor.name} приглашает вас на занятия` : 'Приглашение на занятия', description),
+  };
+}
+
+export default async function InvitePage({ params }: Props) {
   const code = (await params).code;
   const [tutor, user] = await Promise.all([inviter(code), getUser()]);
 
@@ -50,7 +63,7 @@ export default async function InvitePage({ params }: { params: Promise<{ code: s
   if (user) {
     const linked = await one('select 1 from contacts where tutor_id = $1 and student_id = $2', [tutor.id, user.id]);
     return linked ? (
-      <AuthShell title={`Вы уже занимаетесь с ${tutor.name}`} text="Репетитор есть в вашем кабинете — можно написать ему прямо сейчас.">
+      <AuthShell title="Вы уже занимаетесь у этого репетитора" text={`${tutor.name} — в вашем кабинете. Можно написать прямо сейчас.`}>
         <Link href={chat} className="btn btn-primary btn-lg w-full">
           Написать
         </Link>

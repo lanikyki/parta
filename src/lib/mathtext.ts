@@ -5,9 +5,15 @@ export const escapeHtml = (s: string) => s.replace(/[&<>"']/g, (c) => ESC[c]);
 
 const MATH = /\$\$([\s\S]+?)\$\$|\\\[([\s\S]+?)\\\]|\\\(([\s\S]+?)\\\)|\$([^$\n]+?)\$/g;
 
+/**
+ * maxSize/maxExpand — защита от «формул-хулиганов»: \rule{9999em}{9999em} закрыл бы весь экран у собеседника,
+ * а рекурсивные макросы подвесили бы вкладку.
+ */
+export const KATEX_LIMITS = { maxSize: 12, maxExpand: 300 } as const;
+
 function tex(src: string, display: boolean) {
   try {
-    return katex.renderToString(src, { throwOnError: false, displayMode: display, output: 'html', strict: 'ignore' });
+    return katex.renderToString(src, { throwOnError: false, displayMode: display, output: 'html', strict: 'ignore', ...KATEX_LIMITS });
   } catch {
     return escapeHtml(src);
   }

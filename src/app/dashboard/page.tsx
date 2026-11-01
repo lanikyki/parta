@@ -100,7 +100,7 @@ async function People({ user }: { user: User }) {
       {shown.length ? (
         <ul className="mt-3 grid gap-1">
           {shown.map((p: Contact) => (
-            <li key={p.id}>
+            <li key={p.id} className="min-w-0">
               <Link href={`/messages?with=${p.id}`} className="group -mx-2 flex items-center gap-3 rounded-xl px-2 py-2 hover:bg-mist">
                 <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-tint font-medium text-brand-800">{(p.name.trim()[0] || '?').toUpperCase()}</span>
                 <span className="min-w-0 flex-1">

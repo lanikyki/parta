@@ -94,9 +94,9 @@ export function CreateLesson() {
               <option value="group">Групповой (до 20)</option>
             </select>
           </label>
-          <label className="field">
+          <label className="field min-w-0">
             Дата и время
-            <input className="input" type="datetime-local" name="startsAt" />
+            <input className="input min-w-0" type="datetime-local" name="startsAt" />
           </label>
           <label className="field">
             Длительность

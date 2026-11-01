@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import { WaitHint, useHydrated } from '@/components/useHydrated';
 import { GRADES, gradeLabel } from '@/lib/brand';
+import { safeNext } from '@/lib/nav';
 
 type CodeInfo = { email: string; wait?: number; devCode?: string; mail?: boolean; mailError?: string; already?: boolean };
 
@@ -19,7 +20,7 @@ async function post<T = Record<string, unknown>>(url: string, data: unknown): Pr
 function useNext() {
   const params = useSearchParams();
   const next = params.get('next');
-  const safe = next && next.startsWith('/') && !next.startsWith('//') ? next : '/dashboard';
+  const safe = safeNext(next) ?? '/dashboard';
   // Код приглашения репетитора (/invite/…) — переносим между входом и регистрацией
   const invite = /^[a-z2-9]{8}$/.test(params.get('invite') || '') ? params.get('invite')! : '';
   const carry = new URLSearchParams();
@@ -136,7 +137,6 @@ function CodeStep({
           name="code"
           autoFocus
           required
-          maxLength={6}
           pattern="\d{6}"
           placeholder="••••••"
           value={code}
@@ -153,13 +153,13 @@ function CodeStep({
         {busy ? 'Проверяю…' : submitLabel}
       </button>
       <div className="flex flex-wrap items-center justify-between gap-2 text-[15px]">
-        <button type="button" onClick={onBack} className="inline-flex items-center gap-1.5 text-ink-2 hover:text-ink">
+        <button type="button" onClick={onBack} className="inline-flex items-center gap-1.5 py-1.5 text-ink-2 hover:text-ink">
           <ArrowLeft size={16} /> Изменить email
         </button>
         {left > 0 ? (
           <span className="text-ink-3">Новый код — через {left} с</span>
         ) : (
-          <button type="button" onClick={resend} className="font-medium text-brand-700 hover:underline">
+          <button type="button" onClick={resend} className="py-1.5 font-medium text-brand-700 hover:underline">
             Отправить код ещё раз
           </button>
         )}
