@@ -130,6 +130,24 @@ insert into contacts (tutor_id, student_id)
     join lessons l on l.id = m.lesson_id join users u on u.id = m.user_id
    where u.role = 'student' and u.id <> l.owner_id
   on conflict do nothing;
+-- Кто заходил в урок (чтобы репетитор мог удалить участника) и кого удалили
+create table if not exists lesson_people (
+  lesson_id text not null references lessons(id) on delete cascade,
+  identity text not null,
+  who text not null,
+  name text not null,
+  joined_at timestamptz not null default now(),
+  primary key (lesson_id, identity)
+);
+create index if not exists lesson_people_who_idx on lesson_people(lesson_id, who);
+create table if not exists lesson_bans (
+  lesson_id text not null references lessons(id) on delete cascade,
+  who text not null,
+  name text not null,
+  created_at timestamptz not null default now(),
+  primary key (lesson_id, who)
+);
+alter table lessons add column if not exists locked boolean not null default false;
 create index if not exists lessons_owner_idx on lessons(owner_id);
 create index if not exists chat_lesson_idx on chat_messages(lesson_id, created_at);
 create index if not exists events_at_idx on events(at desc);
