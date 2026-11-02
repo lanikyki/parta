@@ -3,15 +3,9 @@
 import {
   Brush,
   ChartSpline,
-  ChevronLeft,
-  ChevronRight,
   Circle,
   Copy,
-  Ellipsis,
   Eraser,
-  FileUp,
-  Grid3x3,
-  Grip,
   Hand,
   Highlighter,
   ImagePlus,
@@ -25,7 +19,6 @@ import {
   Plus,
   Printer,
   Redo2,
-  Rows3,
   Sigma,
   Square,
   Trash2,
@@ -33,17 +26,19 @@ import {
   Undo2,
   Users,
 } from 'lucide-react';
-import type { LucideIcon } from 'lucide-react';
 import type { Room } from 'livekit-client';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import { createPortal } from 'react-dom';
 import type { GraphItem, ImageItem, Item, Page, PageBg, ShapeItem, StrokeItem, TextItem } from '@/lib/board/types';
-import { SHEET, livePages } from '@/lib/board/types';
+import { livePages } from '@/lib/board/types';
 import { type P, bbox, hit, r1, translate, zSort } from './geom';
 import { fitInSheet, importPdf, uploadImage } from './media';
 import { FormulaModal, GraphModal, KeysModal } from './modals';
-import { IdPrefixProvider, ItemView, PageBackground } from './render';
+import { CursorLayer, toolCursor } from './cursors';
+import { type MenuItem, PagesBar } from './pages-bar';
+import { PrintSheets } from './print';
+import { ItemView, ScreenBackground } from './render';
 import { BoardStore, type Me, nextV, useBoardSync } from './sync';
+import { type Box, type Menu, LaserIcon, ToolButton, contentBox, insetsFor, isCompact, isTwoCol } from './ui';
 
 type Tool = 'select' | 'hand' | 'pen' | 'marker' | 'highlighter' | 'eraser' | 'shape' | 'text' | 'laser';
 type ShapeKind = ShapeItem['shape'];
@@ -74,45 +69,6 @@ const MAX_S = 5;
 const uid = () => crypto.randomUUID();
 const clamp = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
 
-function LaserIcon({ size = 20 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">
-      <circle cx="12" cy="12" r="4" fill="#ff3b45" />
-      <circle cx="12" cy="12" r="8" fill="none" stroke="#ff3b45" strokeOpacity=".35" strokeWidth="2" />
-    </svg>
-  );
-}
-
-function ToolButton({
-  active,
-  title,
-  onClick,
-  disabled,
-  children,
-}: {
-  active?: boolean;
-  title: string;
-  onClick: () => void;
-  disabled?: boolean;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      title={title}
-      aria-label={title}
-      aria-pressed={active}
-      disabled={disabled}
-      onClick={onClick}
-      className={`grid h-10 w-10 shrink-0 place-items-center rounded-[11px] transition-colors disabled:opacity-35 ${
-        active ? 'bg-brand text-white' : 'text-ink-2 hover:bg-tint hover:text-brand-800'
-      }`}
-    >
-      {children}
-    </button>
-  );
-}
-
 export function Board({ code, room, me }: { code: string; room: Room | null; me: Me }) {
   const storeRef = useRef<BoardStore | null>(null);
   if (!storeRef.current) storeRef.current = new BoardStore();
@@ -139,9 +95,10 @@ export function Board({ code, room, me }: { code: string; room: Room | null; me:
     if (followLocked && sync.follow.page && store.snap.pages[sync.follow.page] && !store.snap.pages[sync.follow.page].deleted)
       setPageId(sync.follow.page);
   }, [followLocked, sync.follow.page, version, store]);
-  useEffect(() => {
-    if (me.isHost && sync.follow.on && page && sync.follow.page !== page.id) sync.setFollow(true, page.id);
-  }, [me.isHost, sync, page]);
+  // …и видят то же место листа, что и репетитор (когда они на том же листе)
+  const followView = followLocked && page && sync.follow.page === page.id ? sync.follow.view : undefined;
+  const followViewRef = useRef(followView);
+  followViewRef.current = followView;
 
   // Инструменты
   const [tool, setTool] = useState<Tool>('pen');
@@ -149,7 +106,7 @@ export function Board({ code, room, me }: { code: string; room: Room | null; me:
   const [color, setColor] = useState(COLORS[1]);
   const [hlColor, setHlColor] = useState(HL_COLORS[0]);
   const [sizeIdx, setSizeIdx] = useState(1);
-  const [menu, setMenu] = useState<null | 'shapes' | 'bg' | 'pages' | 'more'>(null);
+  const [menu, setMenu] = useState<Menu>(null);
   const [modal, setModal] = useState<null | 'formula' | 'graph' | 'keys'>(null);
   // Листы для печати или сохранения в PDF
   const [printing, setPrinting] = useState<Page[] | null>(null);
@@ -161,7 +118,8 @@ export function Board({ code, room, me }: { code: string; room: Room | null; me:
   // Вид
   const wrapRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
-  const compact = size.w > 0 && size.w < 700;
+  const compact = isCompact(size.w, size.h);
+  const twoCol = isTwoCol(size.w, size.h);
   // очень узкий экран (телефоны шириной до ~380px): панели раскладываем плотнее
   const tiny = size.w > 0 && size.w < 380;
   const [view, setView] = useState<View>({ s: 0.5, x: 0, y: 0 });
@@ -169,18 +127,35 @@ export function Board({ code, room, me }: { code: string; room: Room | null; me:
   viewRef.current = view;
   const autoFit = useRef(true);
 
-  const fit = useCallback(() => {
+  /** Показать часть листа целиком в свободной от панелей части экрана. */
+  const fitBox = useCallback((b: Box) => {
     const { w, h } = sizeRef.current;
     if (!w || !h) return;
-    const ins = w < 700 ? { l: 8, r: 8, t: 56, b: 116 } : { l: 72, r: 16, t: 60, b: 70 };
+    const ins = insetsFor(w, h);
     const aw = Math.max(50, w - ins.l - ins.r);
     const ah = Math.max(50, h - ins.t - ins.b);
-    const s = Math.min(aw / SHEET.w, ah / SHEET.h);
-    setView({ s, x: ins.l + (aw - SHEET.w * s) / 2, y: ins.t + (ah - SHEET.h * s) / 2 });
-    autoFit.current = true;
+    const s = clamp(Math.min(aw / b.w, ah / b.h), MIN_S, MAX_S);
+    setView({ s, x: ins.l + (aw - b.w * s) / 2 - b.x * s, y: ins.t + (ah - b.h * s) / 2 - b.y * s });
   }, []);
+  /** «Показать всё»: лист и всё нарисованное. Ученик в режиме «Все за мной» видит то же, что репетитор. */
+  const fit = useCallback(() => {
+    autoFit.current = true;
+    fitBox(followViewRef.current ?? contentBox(itemsRef.current, 24));
+  }, [fitBox]);
   const sizeRef = useRef(size);
   sizeRef.current = size;
+  /** Какую часть листа сейчас видно между панелями (в координатах листа). */
+  const usableRect = (): Box => {
+    const { w, h } = sizeRef.current;
+    const v = viewRef.current;
+    const ins = insetsFor(w, h);
+    return {
+      x: r1((ins.l - v.x) / v.s),
+      y: r1((ins.t - v.y) / v.s),
+      w: r1(Math.max(50, w - ins.l - ins.r) / v.s),
+      h: r1(Math.max(50, h - ins.t - ins.b) / v.s),
+    };
+  };
   useLayoutEffect(() => {
     const el = wrapRef.current;
     if (!el) return;
@@ -193,11 +168,33 @@ export function Board({ code, room, me }: { code: string; room: Room | null; me:
   useEffect(() => {
     if (autoFit.current) fit();
   }, [size.w, size.h, fit]);
+  // Доска загрузилась или открыли другой лист — показываем всё нарисованное (если вид не меняли вручную)
+  useEffect(() => {
+    if (sync.loaded && autoFit.current) fit();
+  }, [sync.loaded, page?.id, fit]);
+  // Репетитор подвинул или приблизил доску — ученик в «Все за мной» видит то же место
+  useEffect(() => {
+    if (followView) fit();
+  }, [followView?.x, followView?.y, followView?.w, followView?.h, fit]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const setViewManual = (v: View) => {
     autoFit.current = false;
     setView(v);
   };
+
+  // Ведущий в «Все за мной»: сообщаем ученикам свой лист и что на нём видно (не чаще раза в 150 мс)
+  const followSent = useRef(0);
+  useEffect(() => {
+    if (!me.isHost || !sync.follow.on || !page) return;
+    const send = () => {
+      followSent.current = Date.now();
+      sync.setFollow(true, page.id, usableRect());
+    };
+    const wait = sync.follow.page !== page.id ? 0 : 150 - (Date.now() - followSent.current);
+    if (wait <= 0) return send();
+    const t = setTimeout(send, wait);
+    return () => clearTimeout(t);
+  }, [me.isHost, sync.follow.on, sync.follow.page, page?.id, view, size.w, size.h]); // eslint-disable-line react-hooks/exhaustive-deps
   const zoomAt = useCallback((factor: number, cx: number, cy: number) => {
     const v = viewRef.current;
     const s = clamp(v.s * factor, MIN_S, MAX_S);
@@ -288,8 +285,9 @@ export function Board({ code, room, me }: { code: string; room: Room | null; me:
       setEditing({ id: it.id, x: it.x, y: it.y, w: it.w, fs: it.fs, color: it.color, text: it.text, orig: it });
     } else if (p) {
       const fs = SIZES.text[sizeIdx];
-      const x = clamp(p.x, 0, SHEET.w - 160);
-      setEditing({ id: null, x, y: Math.max(0, p.y - fs * 0.7), w: Math.max(160, Math.min(720, SHEET.w - x - 16)), fs, color, text: '' });
+      const vr = usableRect();
+      const w = clamp(vr.x + vr.w - p.x - 16 / viewRef.current.s, 160, 720);
+      setEditing({ id: null, x: p.x, y: r1(p.y - fs * 0.7), w: r1(w), fs, color, text: '' });
     }
   };
   const commitText = () => {
@@ -339,6 +337,58 @@ export function Board({ code, room, me }: { code: string; room: Room | null; me:
     return { x: e.clientX - r.left, y: e.clientY - r.top };
   };
   const toSheet = (pt: P) => ({ x: r1((pt.x - viewRef.current.x) / viewRef.current.s), y: r1((pt.y - viewRef.current.y) / viewRef.current.s) });
+
+  // Свой курсор — остальным: стрелка с именем (не чаще раза в 50 мс; с указкой не нужен)
+  const curPt = useRef<P | null>(null);
+  const curSent = useRef(0);
+  const curTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const touchHide = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const pushCursor = (force = false) => {
+    clearTimeout(curTimer.current);
+    const pt = curPt.current;
+    if (!pt || !page || tool === 'laser' || document.hidden) return;
+    const wait = 50 - (Date.now() - curSent.current);
+    if (!force && wait > 0) {
+      curTimer.current = setTimeout(() => pushCursorRef.current(true), wait);
+      return;
+    }
+    curSent.current = Date.now();
+    const p = toSheet(pt);
+    sync.sendCursor(p.x, p.y, page.id);
+  };
+  const pushCursorRef = useRef(pushCursor);
+  pushCursorRef.current = pushCursor;
+  const { hideCursor } = sync;
+  const dropCursor = useCallback(() => {
+    clearTimeout(curTimer.current);
+    curPt.current = null;
+    hideCursor();
+  }, [hideCursor]);
+  const trackCursor = (e: React.PointerEvent, pt: P) => {
+    clearTimeout(touchHide.current);
+    curPt.current = pt;
+    pushCursor(e.type === 'pointerdown');
+  };
+  // Доску подвинули или открыли другой лист, а мышь стоит — курсор у остальных тоже переезжает
+  useEffect(() => {
+    pushCursorRef.current();
+  }, [view, page?.id]);
+  useEffect(() => {
+    if (tool === 'laser') hideCursor();
+    else pushCursorRef.current(true);
+  }, [tool, hideCursor]);
+  useEffect(() => {
+    // Пока мышь просто лежит на доске, раз в 2,5 с напоминаем, где она: иначе курсор у остальных погаснет
+    const beat = setInterval(() => pushCursorRef.current(true), 2500);
+    const onVis = () => document.hidden && dropCursor();
+    document.addEventListener('visibilitychange', onVis);
+    return () => {
+      clearInterval(beat);
+      document.removeEventListener('visibilitychange', onVis);
+      clearTimeout(curTimer.current);
+      clearTimeout(touchHide.current);
+    };
+  }, [dropCursor]);
   const topHit = (p: P, mode: 'select' | 'erase') => {
     const tol = 8 / viewRef.current.s;
     const list = itemsRef.current;
@@ -380,6 +430,7 @@ export function Board({ code, room, me }: { code: string; room: Room | null; me:
     e.currentTarget.setPointerCapture(e.pointerId);
     const pt = local(e);
     pointers.current.set(e.pointerId, pt);
+    trackCursor(e, pt);
     if (pointers.current.size === 2) {
       cancelGesture();
       const [a, b] = [...pointers.current.values()];
@@ -452,6 +503,8 @@ export function Board({ code, room, me }: { code: string; room: Room | null; me:
   const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
     const pt = local(e);
     if (pointers.current.has(e.pointerId)) pointers.current.set(e.pointerId, pt);
+    // С тачскрина курсор показываем, только пока палец на экране
+    if (e.pointerType !== 'touch' || pointers.current.has(e.pointerId)) trackCursor(e, pt);
     if (tool === 'laser' && page && e.pointerType !== 'touch') showLaser(toSheet(pt));
     const cur = g.current;
     if (!cur) return;
@@ -532,6 +585,10 @@ export function Board({ code, room, me }: { code: string; room: Room | null; me:
 
   const onPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
     pointers.current.delete(e.pointerId);
+    if (e.pointerType === 'touch') {
+      clearTimeout(touchHide.current);
+      touchHide.current = setTimeout(dropCursor, 1500);
+    }
     const cur = g.current;
     if (!cur) return;
     if (cur.kind === 'pinch') {
@@ -646,27 +703,28 @@ export function Board({ code, room, me }: { code: string; room: Room | null; me:
   }, [undo, redo, selected, deleteSelected, modal]);
 
   // Действия
-  const center = () => {
-    const c = toSheet({ x: size.w / 2, y: size.h / 2 });
-    return { x: clamp(c.x, 100, SHEET.w - 100), y: clamp(c.y, 100, SHEET.h - 100) };
-  };
   /** Левый верхний угол для нового объекта: рядом с центром экрана, но не поверх уже нарисованного. */
   const place = (w: number, h: number) => {
-    const c = center();
+    const vr = usableRect();
+    const pad = 10 / viewRef.current.s;
     const boxes = itemsRef.current.filter((i) => !(i.type === 'image' && i.locked)).map(bbox);
-    const fit = (x: number, y: number) => ({ x: clamp(x, 10, Math.max(10, SHEET.w - w - 10)), y: clamp(y, 10, Math.max(10, SHEET.h - h - 10)) });
+    // не дальше видимой части доски
+    const inView = (x: number, y: number) => ({
+      x: clamp(x, vr.x + pad, Math.max(vr.x + pad, vr.x + vr.w - w - pad)),
+      y: clamp(y, vr.y + pad, Math.max(vr.y + pad, vr.y + vr.h - h - pad)),
+    });
     const free = (p: { x: number; y: number }) =>
       !boxes.some((b) => p.x < b.x + b.w + 16 && p.x + w + 16 > b.x && p.y < b.y + b.h + 16 && p.y + h + 16 > b.y);
-    const base = fit(c.x - w / 2, c.y - h / 2);
+    const base = inView(vr.x + vr.w / 2 - w / 2, vr.y + vr.h / 2 - h / 2);
     if (free(base)) return base;
     // Ищем свободное место по расширяющимся кольцам вокруг центра
     for (let ring = 1; ring <= 6; ring++)
       for (let k = 0; k < 8 * ring; k++) {
         const a = (k / (8 * ring)) * Math.PI * 2;
-        const p = fit(base.x + Math.cos(a) * ring * 120, base.y + Math.sin(a) * ring * 90);
+        const p = inView(base.x + Math.cos(a) * ring * 120, base.y + Math.sin(a) * ring * 90);
         if (free(p)) return p;
       }
-    return fit(base.x + 40, base.y + 40);
+    return inView(base.x + 40, base.y + 40);
   };
   const addItems = (list: Item[]) => {
     sync.commit(list);
@@ -708,10 +766,10 @@ export function Board({ code, room, me }: { code: string; room: Room | null; me:
     setError('');
     try {
       const { url, w, h } = await uploadImage(code, file);
-      const k = Math.min(1, 720 / w, 560 / h);
-      const p = at
-        ? { x: clamp(at.x - (w * k) / 2, 10, Math.max(10, SHEET.w - w * k - 10)), y: clamp(at.y - (h * k) / 2, 10, Math.max(10, SHEET.h - h * k - 10)) }
-        : place(w * k, h * k);
+      // не больше 720×560 и не больше видимой части доски
+      const vr = usableRect();
+      const k = Math.min(1, Math.min(720, vr.w * 0.7) / w, Math.min(560, vr.h * 0.7) / h);
+      const p = at ? { x: at.x - (w * k) / 2, y: at.y - (h * k) / 2 } : place(w * k, h * k);
       const it: ImageItem = { id: uid(), type: 'image', page: page.id, v: nextV(), by: me.identity, x: r1(p.x), y: r1(p.y), w: r1(w * k), h: r1(h * k), src: url };
       addItems([it]);
       setTool('select');
@@ -800,58 +858,12 @@ export function Board({ code, room, me }: { code: string; room: Room | null; me:
     return () => clearTimeout(t);
   }, [error]);
 
-  // Печать и сохранение в PDF: рисуем листы целиком в отдельном блоке (на экране он скрыт) и открываем печать
-  useEffect(() => {
-    if (!printing) return;
-    let alive = true;
-    const ids = new Set(printing.map((p) => p.id));
-    const srcs = [...new Set(Object.values(store.snap.items).flatMap((i) => (i.type === 'image' && !i.deleted && ids.has(i.page) ? [i.src] : [])))];
-    const done = () => alive && setPrinting(null);
-    (async () => {
-      await Promise.all(
-        srcs.map(
-          (src) =>
-            new Promise((r) => {
-              const im = new Image();
-              im.onload = im.onerror = r;
-              im.src = src;
-            }),
-        ),
-      );
-      await document.fonts?.ready;
-      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-      if (!alive) return;
-      window.addEventListener('afterprint', done, { once: true });
-      window.print();
-    })();
-    return () => {
-      alive = false;
-      window.removeEventListener('afterprint', done);
-    };
-  }, [printing, store]);
-
-  /** Что печатать: сам лист и всё, что нарисовали за его краями (но не дальше ещё одного листа в сторону). */
-  const printBox = (pageId: string) => {
-    let [x0, y0, x1, y1] = [0, 0, SHEET.w, SHEET.h];
-    for (const it of Object.values(store.snap.items)) {
-      if (it.deleted || it.page !== pageId) continue;
-      const b = bbox(it);
-      if (![b.x, b.y, b.w, b.h].every(Number.isFinite)) continue;
-      x0 = Math.min(x0, b.x - 16);
-      y0 = Math.min(y0, b.y - 16);
-      x1 = Math.max(x1, b.x + b.w + 16);
-      y1 = Math.max(y1, b.y + b.h + 16);
-    }
-    [x0, y0, x1, y1] = [Math.max(x0, -SHEET.w), Math.max(y0, -SHEET.h), Math.min(x1, 2 * SHEET.w), Math.min(y1, 2 * SHEET.h)];
-    return `${r1(x0)} ${r1(y0)} ${r1(x1 - x0)} ${r1(y1 - y0)}`;
-  };
-
   // Пункты меню «Ещё»
-  const moreItems: [string, LucideIcon, () => void][] = [
-    ...(me.isHost ? ([['Очистить лист', Eraser, clearPage]] as [string, LucideIcon, () => void][]) : []),
+  const moreItems: MenuItem[] = [
+    ...(me.isHost ? ([['Очистить лист', Eraser, clearPage]] as MenuItem[]) : []),
     ['Печать или PDF: этот лист', Printer, () => page && setPrinting([page])],
-    ...(pages.length > 1 ? ([['Печать или PDF: все листы', Printer, () => setPrinting(pages)]] as [string, LucideIcon, () => void][]) : []),
-    ...(!compact ? ([['Горячие клавиши', Keyboard, () => setModal('keys')]] as [string, LucideIcon, () => void][]) : []),
+    ...(pages.length > 1 ? ([['Печать или PDF: все листы', Printer, () => setPrinting(pages)]] as MenuItem[]) : []),
+    ...(!compact ? ([['Горячие клавиши', Keyboard, () => setModal('keys')]] as MenuItem[]) : []),
   ];
 
   const insertPagesAfter = (count: number) => {
@@ -908,7 +920,8 @@ export function Board({ code, room, me }: { code: string; room: Room | null; me:
 
   const drawTool = tool === 'pen' || tool === 'marker' || tool === 'highlighter' || tool === 'shape' || tool === 'text';
   const sizeKey = (tool === 'pen' || tool === 'marker' || tool === 'highlighter' || tool === 'shape' || tool === 'text' ? tool : 'pen') as keyof typeof SIZES;
-  const cursor = { select: 'default', hand: 'grab', pen: 'crosshair', marker: 'crosshair', highlighter: 'crosshair', eraser: 'cell', shape: 'crosshair', text: 'text', laser: 'none' }[tool];
+  // Свой курсор: кружок цвета и толщины линии — хорошо виден на клетках
+  const cursor = toolCursor(tool, { color: tool === 'highlighter' ? hlColor : color, size: SIZES[sizeKey][sizeIdx], s: view.s, canDraw });
   const ShapeIcon = { line: Minus, arrow: MoveUpRight, rect: Square, ellipse: Circle }[shapeKind];
 
   const liveStrokes = useMemo(
@@ -925,6 +938,36 @@ export function Board({ code, room, me }: { code: string; room: Room | null; me:
   const selBox = selectedItem && selectedItem.id !== hiddenId ? bbox(selectedItem) : null;
   const k = view.s;
 
+  // Меню фигур. На телефоне — над панелями: внутри прокручиваемой строки инструментов его бы обрезало
+  const shapesMenu = (
+    <div
+      data-ui
+      className={`absolute z-20 flex gap-1 rounded-xl bg-white p-1.5 shadow-lift ${compact ? 'bottom-[120px] left-2' : twoCol ? 'top-0 left-[100px]' : 'top-0 left-12'}`}
+    >
+      {(
+        [
+          ['line', 'Линия', Minus],
+          ['arrow', 'Стрелка', MoveUpRight],
+          ['rect', 'Прямоугольник', Square],
+          ['ellipse', 'Эллипс', Circle],
+        ] as const
+      ).map(([s, title, Icon]) => (
+        <ToolButton
+          key={s}
+          title={title}
+          active={shapeKind === s}
+          onClick={() => {
+            setShapeKind(s);
+            setTool('shape');
+            setMenu(null);
+          }}
+        >
+          <Icon size={19} />
+        </ToolButton>
+      ))}
+    </div>
+  );
+
   const tools: [Tool, string, React.ReactNode][] = [
     ['select', 'Выбор и перемещение (V)', <MousePointer2 key="s" size={19} />],
     ['hand', 'Рука — двигать лист (H, пробел)', <Hand key="h" size={19} />],
@@ -937,7 +980,7 @@ export function Board({ code, room, me }: { code: string; room: Room | null; me:
   return (
     <div
       ref={wrapRef}
-      className="relative h-full w-full touch-none overflow-hidden bg-[#f1f6f3] select-none"
+      className="relative h-full w-full touch-none overflow-hidden bg-white select-none"
       onDragEnter={(e) => {
         if (!withFiles(e)) return;
         e.preventDefault();
@@ -964,14 +1007,17 @@ export function Board({ code, room, me }: { code: string; room: Room | null; me:
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerCancel}
-        onPointerLeave={() => tool === 'laser' && setMyLaser(null)}
+        onPointerLeave={(e) => {
+          if (tool === 'laser') setMyLaser(null);
+          if (e.pointerType !== 'touch') dropCursor();
+        }}
         onDoubleClick={onDoubleClick}
         onContextMenu={(e) => e.preventDefault()}
       >
         <svg width={size.w} height={size.h} className="block">
+          {/* Тетрадь на весь экран: без рамок листа, клетки (линейки, точки) повсюду */}
+          <ScreenBackground bg={page?.bg ?? 'grid'} s={k} x={view.x} y={view.y} w={size.w} h={size.h} />
           <g transform={`translate(${view.x} ${view.y}) scale(${k})`}>
-            <rect x={-2 / k} y={4 / k} width={SHEET.w + 4 / k} height={SHEET.h} rx={6} fill="rgb(10 60 40 / .07)" />
-            <PageBackground bg={page?.bg ?? 'grid'} />
             {items.map((it) => (it.id === hiddenId ? null : <ItemView key={it.id} it={it} onMeasure={onMeasure} />))}
             {liveStrokes.map((it) => (
               <g key={`live-${it.id}`} opacity={0.85}>
@@ -1010,6 +1056,9 @@ export function Board({ code, room, me }: { code: string; room: Room | null; me:
           </g>
         </svg>
       </div>
+
+      {/* Курсоры других участников */}
+      <CursorLayer store={sync.cursors} page={page?.id} view={view} />
 
       {/* Кнопки у выделенного: копия и удаление */}
       {selBox && canDraw && (
@@ -1074,8 +1123,10 @@ export function Board({ code, room, me }: { code: string; room: Room | null; me:
       {/* Панель инструментов */}
       <div
         data-ui
-        className={`absolute z-10 flex gap-1 rounded-2xl bg-white p-1.5 shadow-lift ${
-          compact ? 'right-2 bottom-2 left-2 overflow-x-auto' : 'top-1/2 left-3 -translate-y-1/2 flex-col'
+        className={`absolute z-10 gap-1 rounded-2xl bg-white p-1.5 shadow-lift ${
+          compact
+            ? 'right-2 bottom-2 left-2 flex overflow-x-auto'
+            : `top-1/2 left-3 -translate-y-1/2 ${twoCol ? 'grid grid-cols-2' : 'flex flex-col'}`
         }`}
       >
         {tools.map(([t, title, icon]) => (
@@ -1095,31 +1146,7 @@ export function Board({ code, room, me }: { code: string; room: Room | null; me:
           >
             <ShapeIcon size={19} />
           </ToolButton>
-          {menu === 'shapes' && (
-            <div className={`absolute z-20 flex gap-1 rounded-xl bg-white p-1.5 shadow-lift ${compact ? 'bottom-12 left-0' : 'top-0 left-12'}`}>
-              {(
-                [
-                  ['line', 'Линия', Minus],
-                  ['arrow', 'Стрелка', MoveUpRight],
-                  ['rect', 'Прямоугольник', Square],
-                  ['ellipse', 'Эллипс', Circle],
-                ] as const
-              ).map(([s, title, Icon]) => (
-                <ToolButton
-                  key={s}
-                  title={title}
-                  active={shapeKind === s}
-                  onClick={() => {
-                    setShapeKind(s);
-                    setTool('shape');
-                    setMenu(null);
-                  }}
-                >
-                  <Icon size={19} />
-                </ToolButton>
-              ))}
-            </div>
-          )}
+          {menu === 'shapes' && !compact && shapesMenu}
         </div>
         <ToolButton title="Текст (T)" active={tool === 'text'} disabled={!canDraw} onClick={() => setTool('text')}>
           <Type size={19} />
@@ -1136,7 +1163,7 @@ export function Board({ code, room, me }: { code: string; room: Room | null; me:
         <ToolButton title="Лазерная указка (L)" active={tool === 'laser'} onClick={() => setTool('laser')}>
           <LaserIcon />
         </ToolButton>
-        <span className={compact ? 'mx-0.5 w-px shrink-0 self-stretch bg-line' : 'my-0.5 h-px bg-line'} />
+        <span className={compact ? 'mx-0.5 w-px shrink-0 self-stretch bg-line' : `my-0.5 h-px bg-line ${twoCol ? 'col-span-2' : ''}`} />
         <ToolButton title="Отменить (Ctrl+Z)" disabled={!undoStack.current.length} onClick={undo}>
           <Undo2 size={19} />
         </ToolButton>
@@ -1145,11 +1172,13 @@ export function Board({ code, room, me }: { code: string; room: Room | null; me:
         </ToolButton>
       </div>
 
+      {menu === 'shapes' && compact && shapesMenu}
+
       {/* Цвет и толщина */}
       {drawTool && canDraw && (
         <div
           data-ui
-          className={`absolute z-10 flex items-center rounded-2xl bg-white px-2.5 py-2 shadow-lift ${compact ? 'bottom-[64px] left-2 max-w-[calc(100%-16px)] gap-1 overflow-x-auto' : 'bottom-3 left-3 gap-1.5'}`}
+          className={`absolute z-10 flex items-center rounded-2xl bg-white px-2.5 py-2 shadow-lift ${compact ? 'bottom-[64px] left-2 max-w-[calc(100%-16px)] gap-1 overflow-x-auto' : `bottom-3 gap-1.5 ${twoCol ? 'left-[116px]' : 'left-[72px]'}`}`}
         >
           {(tool === 'highlighter' ? HL_COLORS : COLORS).map((c) => {
             const active = (tool === 'highlighter' ? hlColor : color) === c;
@@ -1187,150 +1216,24 @@ export function Board({ code, room, me }: { code: string; room: Room | null; me:
       )}
 
       {/* Листы */}
-      <div
-        data-ui
-        className={`absolute z-10 flex items-center gap-0.5 rounded-2xl bg-white p-1 shadow-lift ${
-          compact ? 'top-2 left-2' : drawTool && canDraw && size.w < 1100 ? 'right-3 bottom-3' : 'bottom-3 left-1/2 -translate-x-1/2'
-        }`}
-      >
-        <ToolButton title="Предыдущий лист" disabled={pageIdx === 0 || followLocked} onClick={() => goPage(-1)}>
-          <ChevronLeft size={19} />
-        </ToolButton>
-        <span className={`px-1 text-center font-mono text-[13px] text-ink-2 ${compact ? 'min-w-[44px]' : 'min-w-[64px]'}`}>
-          {pageIdx + 1} / {pages.length}
-        </span>
-        <ToolButton title="Следующий лист" disabled={pageIdx >= pages.length - 1 || followLocked} onClick={() => goPage(1)}>
-          <ChevronRight size={19} />
-        </ToolButton>
-        {compact && (
-          <div className="relative">
-            <ToolButton title={canDraw ? 'Листы и фон' : 'Ещё: печать и PDF'} active={menu === 'pages'} onClick={() => setMenu(menu === 'pages' ? null : 'pages')}>
-              <Ellipsis size={19} />
-            </ToolButton>
-            {menu === 'pages' && (
-              <div className="absolute top-12 left-0 z-20 grid w-60 gap-0.5 rounded-xl bg-white p-1.5 shadow-lift">
-                {(
-                  [
-                    ...(canDraw
-                      ? ([
-                          ['Новый лист', Plus, addPage],
-                          ['Загрузить PDF', FileUp, () => pdfRef.current?.click()],
-                          ...(pages.length > 1 ? ([['Удалить лист', Trash2, deletePage]] as [string, LucideIcon, () => void][]) : []),
-                        ] as [string, LucideIcon, () => void][])
-                      : []),
-                    ...moreItems,
-                  ] as [string, LucideIcon, () => void][]
-                ).map(([label, Icon, act]) => (
-                  <button
-                    key={label}
-                    type="button"
-                    onClick={() => {
-                      setMenu(null);
-                      act();
-                    }}
-                    className="flex min-h-10 items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-[14px] leading-tight hover:bg-mist"
-                  >
-                    <Icon size={17} className="shrink-0" /> {label}
-                  </button>
-                ))}
-                {canDraw && (
-                  <>
-                    <span className="mx-2 my-1 h-px bg-line" />
-                    <span className="px-2.5 pt-0.5 pb-1 text-[12px] text-ink-3">Фон листа</span>
-                    <div className="grid grid-cols-4 gap-1 px-1 pb-0.5">
-                      {(
-                        [
-                          ['grid', 'Клетка', Grid3x3],
-                          ['lines', 'Линейка', Rows3],
-                          ['dots', 'Точки', Grip],
-                          ['plain', 'Чистый', Square],
-                        ] as const
-                      ).map(([bg, label, Icon]) => (
-                        <button
-                          key={bg}
-                          type="button"
-                          title={label}
-                          aria-label={label}
-                          onClick={() => setBg(bg)}
-                          className={`grid h-10 place-items-center rounded-lg ${page?.bg === bg ? 'bg-tint text-brand-800' : 'text-ink-2 hover:bg-mist'}`}
-                        >
-                          <Icon size={17} />
-                        </button>
-                      ))}
-                    </div>
-                  </>
-                )}
-              </div>
-            )}
-          </div>
-        )}
-        {canDraw && !compact && (
-          <>
-            <span className="mx-0.5 h-6 w-px bg-line" />
-            <ToolButton title="Новый лист" onClick={addPage}>
-              <Plus size={19} />
-            </ToolButton>
-            <div className="relative">
-              <ToolButton title="Фон листа" onClick={() => setMenu(menu === 'bg' ? null : 'bg')}>
-                <Grid3x3 size={19} />
-              </ToolButton>
-              {menu === 'bg' && (
-                <div className={`absolute z-20 grid w-44 gap-0.5 rounded-xl bg-white p-1.5 shadow-lift ${compact ? 'top-12 left-0' : 'bottom-12 left-1/2 -translate-x-1/2'}`}>
-                  {(
-                    [
-                      ['grid', 'Клетка', Grid3x3],
-                      ['lines', 'Линейка', Rows3],
-                      ['dots', 'Точки', Grip],
-                      ['plain', 'Чистый', Square],
-                    ] as const
-                  ).map(([bg, label, Icon]) => (
-                    <button
-                      key={bg}
-                      type="button"
-                      onClick={() => setBg(bg)}
-                      className={`flex h-9 items-center gap-2 rounded-lg px-2.5 text-[14px] ${page?.bg === bg ? 'bg-tint text-brand-800' : 'hover:bg-mist'}`}
-                    >
-                      <Icon size={16} /> {label}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-            <ToolButton title="Загрузить PDF или презентацию (PDF)" onClick={() => pdfRef.current?.click()}>
-              <FileUp size={19} />
-            </ToolButton>
-            {pages.length > 1 && (
-              <ToolButton title="Удалить лист" onClick={deletePage}>
-                <Trash2 size={18} />
-              </ToolButton>
-            )}
-          </>
-        )}
-        {!compact && (
-          <div className="relative">
-            <ToolButton title={me.isHost ? 'Ещё: очистить, печать и PDF, горячие клавиши' : 'Ещё: печать и PDF, горячие клавиши'} active={menu === 'more'} onClick={() => setMenu(menu === 'more' ? null : 'more')}>
-              <Ellipsis size={19} />
-            </ToolButton>
-            {menu === 'more' && (
-              <div className="absolute right-0 bottom-12 z-20 grid w-64 gap-0.5 rounded-xl bg-white p-1.5 shadow-lift">
-                {moreItems.map(([label, Icon, act]) => (
-                  <button
-                    key={label}
-                    type="button"
-                    onClick={() => {
-                      setMenu(null);
-                      act();
-                    }}
-                    className="flex h-10 items-center gap-2.5 rounded-lg px-2.5 text-left text-[14px] hover:bg-mist"
-                  >
-                    <Icon size={17} className="shrink-0" /> {label}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
+      <PagesBar
+        place={compact ? 'top-2 left-2' : drawTool && canDraw && size.w < (twoCol ? 1300 : 1200) ? 'right-3 bottom-3' : 'bottom-3 left-1/2 -translate-x-1/2'}
+        compact={compact}
+        index={pageIdx}
+        count={pages.length}
+        locked={followLocked}
+        canDraw={canDraw}
+        isHost={me.isHost}
+        current={page?.bg}
+        menu={menu}
+        setMenu={setMenu}
+        onGo={goPage}
+        onAdd={addPage}
+        onPdf={() => pdfRef.current?.click()}
+        onDelete={deletePage}
+        onBg={setBg}
+        more={moreItems}
+      />
 
       {/* Масштаб и режимы ведущего */}
       <div data-ui className={`absolute top-2 right-2 z-10 flex gap-1.5 sm:top-3 sm:right-3 ${tiny ? 'flex-col items-end' : 'items-center'}`}>
@@ -1338,9 +1241,9 @@ export function Board({ code, room, me }: { code: string; room: Room | null; me:
           <div className="flex items-center gap-0.5 rounded-2xl bg-white p-1 shadow-lift">
             <button
               type="button"
-              onClick={() => page && sync.setFollow(!sync.follow.on, page.id)}
+              onClick={() => page && sync.setFollow(!sync.follow.on, page.id, usableRect())}
               className={`flex h-10 items-center gap-1.5 rounded-[11px] px-3 text-[14px] font-medium ${sync.follow.on ? 'bg-brand text-white' : 'text-ink-2 hover:bg-tint'}`}
-              title="Ученики видят тот же лист, что и вы"
+              title="Ученики видят тот же лист и то же место на нём, что и вы"
             >
               <Users size={17} /> <span className={compact ? 'hidden' : ''}>Все за мной</span>
             </button>
@@ -1360,7 +1263,7 @@ export function Board({ code, room, me }: { code: string; room: Room | null; me:
               <Minus size={18} />
             </ToolButton>
           )}
-          <button type="button" onClick={fit} title="Вписать лист" className="h-10 min-w-[52px] rounded-[11px] px-1 font-mono text-[12px] text-ink-2 hover:bg-tint">
+          <button type="button" onClick={fit} title="Показать всё" className="h-10 min-w-[52px] rounded-[11px] px-1 font-mono text-[12px] text-ink-2 hover:bg-tint">
             {Math.round(k * 100)}%
           </button>
           {!compact && (
@@ -1369,7 +1272,7 @@ export function Board({ code, room, me }: { code: string; room: Room | null; me:
             </ToolButton>
           )}
           {!compact && (
-            <ToolButton title="Вписать лист в экран" onClick={fit}>
+            <ToolButton title="Показать всё нарисованное" onClick={fit}>
               <Maximize2 size={17} />
             </ToolButton>
           )}
@@ -1378,7 +1281,7 @@ export function Board({ code, room, me }: { code: string; room: Room | null; me:
 
       {/* Статусы */}
       <div className={`pointer-events-none absolute top-16 left-1/2 z-10 grid -translate-x-1/2 justify-items-center gap-2 ${me.isHost && room ? '' : 'sm:top-3'}`}>
-        {followLocked && <span className="rounded-full bg-brand px-3 py-1.5 text-[13px] font-medium text-white shadow-soft">Репетитор ведёт урок — вы на его листе</span>}
+        {followLocked && <span className="rounded-full bg-brand px-3 py-1.5 text-[13px] font-medium text-white shadow-soft">Репетитор ведёт урок — вы видите то же, что и он</span>}
         {!canDraw && <span className="rounded-full bg-white px-3 py-1.5 text-[13px] text-ink-2 shadow-soft">Сейчас рисует только репетитор</span>}
         {busy && (
           <span className="flex items-center gap-2 rounded-full bg-white px-3 py-1.5 text-[13px] text-ink-2 shadow-soft">
@@ -1393,7 +1296,7 @@ export function Board({ code, room, me }: { code: string; room: Room | null; me:
       </div>
 
       {!sync.loaded && (
-        <div className="absolute inset-0 z-30 grid place-items-center bg-[#f1f6f3]">
+        <div className="absolute inset-0 z-30 grid place-items-center bg-white">
           <span className="flex items-center gap-2 text-ink-2">
             <LoaderCircle className="animate-spin" size={20} /> Загружаем доску…
           </span>
@@ -1414,25 +1317,7 @@ export function Board({ code, room, me }: { code: string; room: Room | null; me:
           </div>
         </div>
       )}
-      {printing &&
-        createPortal(
-          <div className="board-print" aria-hidden="true">
-            {printing.map((p) => (
-              <IdPrefixProvider key={p.id} value={`print-${p.id}-`}>
-                <svg viewBox={printBox(p.id)} className="board-print-sheet" xmlns="http://www.w3.org/2000/svg">
-                  <PageBackground bg={p.bg} />
-                  {Object.values(store.snap.items)
-                    .filter((i) => !i.deleted && i.page === p.id)
-                    .sort(zSort)
-                    .map((it) => (
-                      <ItemView key={it.id} it={it} />
-                    ))}
-                </svg>
-              </IdPrefixProvider>
-            ))}
-          </div>,
-          document.body,
-        )}
+      {printing && <PrintSheets pages={printing} items={store.snap.items} onDone={() => setPrinting(null)} />}
     </div>
   );
 }
