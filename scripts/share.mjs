@@ -135,7 +135,7 @@ function tunaSubdomain(bin, tenv, env) {
     if (/^[a-z0-9-]+$/.test(saved)) return saved;
   } catch {}
   const r = tunaCall(bin, ['domain', 'list', '--json'], tenv);
-  const m = r.ok && r.out.match(/"([a-z]+-[a-z]+-\d{4})(?:\.(?:ru|nl)\.tuna\.am)?"/);
+  const m = r.ok && r.out.match(/"([a-z]+-[a-z]+-\d{3,5})(?:\.[a-z0-9.-]*tuna\.(?:am|free))?"/);
   if (m) saveTunaSub(m[1]);
   return m ? m[1] : '';
 }
@@ -459,20 +459,21 @@ function box(title, url) {
   say(`\n${line}\n  ${title}:  ${url}\n${line}`);
 }
 
-function shareNotes(link, env, copied) {
+function shareNotes(link, env, copied, video) {
   box('Ссылка для друга', link.url);
   if (copied) say('  • Ссылка уже скопирована — вставьте её другу в сообщение (Ctrl+V).');
   if (link.id === 'tuna') {
     say('  • При первом заходе друг увидит страницу Tuna с предупреждением — пусть нажмёт кнопку перехода на сайт.');
-    say(/\.tuna\.am$/.test(new URL(link.url).hostname) && !/-\d+-\d+-\d+-\d+\./.test(link.url) ? '  • Ссылка постоянная: в следующий раз она будет такой же.' : '  • В следующий раз ссылка, скорее всего, станет постоянной (Tuna выдаёт свой адрес каждому аккаунту).');
+    say(/^[a-z]+-[a-z]+-\d{3,5}\.(?:[a-z]+\.)?tuna\.(?:am|free)$/.test(new URL(link.url).hostname) ? '  • Ссылка постоянная: в следующий раз она будет такой же.' : '  • В следующий раз ссылка, скорее всего, станет постоянной (Tuna выдаёт свой адрес каждому аккаунту).');
   } else if (link.id === 'pinggy') say('  • По ссылке сначала откроется страница Pinggy на английском — нужно нажать «Enter site». Ссылка работает 60 минут.');
   else say('  • При следующем запуске ссылка будет другой.');
   say('  • Работает, пока открыто это окно и включён компьютер. Если связь пропадёт, скрипт переподключится сам,');
   say('    а если адрес сменится — покажет здесь новую ссылку.');
   say('  • Кнопки «Скопировать ссылку» на сайте сразу дают адрес с этой ссылкой — даже если у вас сайт открыт как localhost.');
-  if (/\/\/(localhost|127\.0\.0\.1)(:|\/|$)/.test(env.LIVEKIT_URL || '')) {
-    say('  • Видео и доска в уроке у друга НЕ заработают: видеосервер на вашем компьютере не виден из интернета.');
-    say('    Подключите бесплатный LiveKit Cloud — README, раздел «Показать сайт другу», шаг 2.');
+  if (video === 'local') say('  • Видео в уроке идёт через эту же ссылку и ваш компьютер — VPN и LiveKit Cloud не нужны. VPN лучше выключить.');
+  else if (/\/\/(localhost|127\.0\.0\.1)(:|\/|$)/.test(env.LIVEKIT_URL || '')) {
+    say('  • Видео в уроке у друга не заработает: видеосервер не запустился (подробности — в tools/livekit.log).');
+    say('    Доска и чат работают.');
   }
   const mail = (env.SMTP_USER || '').trim() && (env.SMTP_PASS || '').trim();
   if (!mail) say('  • Почта не настроена: код для регистрации друга появится в этом окне (строка «Код для …») — продиктуйте его другу.');
@@ -487,9 +488,9 @@ function shareNotes(link, env, copied) {
 
 /* ───────── Главное: ссылка + присмотр за ней ───────── */
 
-export async function startShare({ env, children }) {
+export async function startShare({ env, children, video = '' }) {
   fs.mkdirSync(TOOLS, { recursive: true });
-  const state = { env, children, order: providerOrder(env.SHARE_SERVICE), link: null, busy: false, stopped: false, drops: [] };
+  const state = { env, children, video, order: providerOrder(env.SHARE_SERVICE), link: null, busy: false, stopped: false, drops: [] };
   process.on('exit', () => {
     state.stopped = true;
     try {
@@ -526,7 +527,7 @@ function accept(state, link, first) {
   saveUrl(link.url);
   const copied = copyText(link.url);
   if (first) {
-    shareNotes(link, state.env, copied);
+    shareNotes(link, state.env, copied, state.video);
     openBrowser(link.url);
   } else if (before !== link.url) {
     box('НОВАЯ ссылка для друга', link.url);

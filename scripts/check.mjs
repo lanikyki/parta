@@ -461,7 +461,7 @@ function checkAdmin(env) {
   return !bad.length;
 }
 
-export async function runChecks({ brief = false, autofill = false } = {}) {
+export async function runChecks({ brief = false, autofill = false, skipVideo = false } = {}) {
   const file = path.join(ROOT, '.env.local');
   const env = readEnv(file);
   if (!env) {
@@ -469,7 +469,8 @@ export async function runChecks({ brief = false, autofill = false } = {}) {
     log.info('Создайте его из образца: в Windows — copy .env.example .env.local, в macOS и Linux — cp .env.example .env.local');
     return { video: false, ai: false };
   }
-  const video = await checkVideo(env);
+  // В режиме показа другу видеосервер запускается свой, с новыми ключами, — его уже проверили при запуске
+  const video = skipVideo ? true : await checkVideo(env);
   const ai = await checkAI(env, { brief, autofill: autofill ? file : null });
   const mail = await checkMail(env);
   const admin = checkAdmin(env);
