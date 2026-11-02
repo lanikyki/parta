@@ -1,7 +1,7 @@
 'use client';
 
 import { getStroke } from 'perfect-freehand';
-import { memo, useLayoutEffect, useMemo, useRef } from 'react';
+import { createContext, memo, useContext, useLayoutEffect, useMemo, useRef } from 'react';
 import { tryCompile } from '@/lib/board/mathexpr';
 import type { GraphItem, Item, PageBg, ShapeItem, StrokeItem, TextItem } from '@/lib/board/types';
 import { SHEET } from '@/lib/board/types';
@@ -9,6 +9,10 @@ import { renderMathText } from '@/lib/mathtext';
 import { textHeight, textHeights } from './geom';
 
 export const GRAPH_COLORS = ['#12a566', '#ff5a5f', '#2f6bff'];
+
+/** Приставка к id узоров и обрезок: у копии листа для печати они свои, иначе браузер возьмёт их из скрытой доски. */
+const IdPrefix = createContext('');
+export const IdPrefixProvider = IdPrefix.Provider;
 
 function pathFromOutline(points: number[][]) {
   if (!points.length) return '';
@@ -149,7 +153,7 @@ export function GraphView({ it }: { it: Pick<GraphItem, 'x' | 'y' | 'w' | 'h' | 
   for (let v = -Math.floor(range / step) * step; v <= range; v += step) if (v !== 0) ticks.push(v);
   const yTicks: number[] = [];
   for (let v = -Math.floor(yRange / step) * step; v <= yRange; v += step) if (v !== 0) yTicks.push(v);
-  const clip = `gc-${it.id}`;
+  const clip = `${useContext(IdPrefix)}gc-${it.id}`;
   return (
     <g transform={`translate(${it.x} ${it.y})`}>
       <defs>
@@ -204,21 +208,22 @@ export const ItemView = memo(function ItemView({ it, onMeasure }: { it: Item; on
 });
 
 export function PageBackground({ bg }: { bg: PageBg }) {
+  const pre = useContext(IdPrefix);
   return (
     <>
       <defs>
-        <pattern id="bg-grid" width="40" height="40" patternUnits="userSpaceOnUse">
+        <pattern id={`${pre}bg-grid`} width="40" height="40" patternUnits="userSpaceOnUse">
           <path d="M40 0H0V40" fill="none" stroke="#e2ece7" strokeWidth="1.2" />
         </pattern>
-        <pattern id="bg-lines" width="40" height="40" patternUnits="userSpaceOnUse">
+        <pattern id={`${pre}bg-lines`} width="40" height="40" patternUnits="userSpaceOnUse">
           <path d="M0 39.5H40" fill="none" stroke="#dbe7e1" strokeWidth="1.2" />
         </pattern>
-        <pattern id="bg-dots" width="40" height="40" patternUnits="userSpaceOnUse">
+        <pattern id={`${pre}bg-dots`} width="40" height="40" patternUnits="userSpaceOnUse">
           <circle cx="20" cy="20" r="1.8" fill="#c9dbd2" />
         </pattern>
       </defs>
       <rect width={SHEET.w} height={SHEET.h} fill="#fff" />
-      {bg !== 'plain' && <rect width={SHEET.w} height={SHEET.h} fill={`url(#bg-${bg})`} />}
+      {bg !== 'plain' && <rect width={SHEET.w} height={SHEET.h} fill={`url(#${pre}bg-${bg})`} />}
     </>
   );
 }

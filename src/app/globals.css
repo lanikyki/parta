@@ -565,3 +565,36 @@
 .bubble-mine .prose-chat code {
   background: rgb(255 255 255 / 0.22);
 }
+
+/* Печать доски: на экране блок скрыт, при печати виден только он — по листу на страницу */
+.board-print {
+  display: none;
+}
+@page board {
+  size: A4 landscape;
+  margin: 8mm;
+}
+@media print {
+  body:has(> .board-print) > *:not(.board-print) {
+    display: none !important;
+  }
+  body:has(> .board-print) {
+    background: #fff !important;
+  }
+  .board-print {
+    display: block;
+  }
+  .board-print-sheet {
+    page: board;
+    display: block;
+    width: 100%;
+    height: 190mm;
+    break-after: page;
+    break-inside: avoid;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+  .board-print-sheet:last-child {
+    break-after: auto;
+  }
+}

@@ -6,6 +6,7 @@ import { logEvent } from './events';
 import { siteUrl } from './http';
 import { inviteCode, isInviteCode, uid } from './ids';
 import { letter, mailConfigured, mailErrorText, sendMail } from './mail';
+import { filesSummary, MAX_FILES, msgPreview, type MsgFile } from './msgfile';
 
 // Переписка внутри сайта: репетитор ↔ ученик и пользователь ↔ поддержка (отвечают администраторы).
 
@@ -20,13 +21,24 @@ export type ThreadItem = {
   sub: string;
   lastText: string;
   lastMine: boolean;
+  /** Собеседник прочитал последнее (моё) сообщение */
+  lastRead: boolean;
   lastAt: string;
   unread: number;
 };
-export type Msg = { id: number; mine: boolean; author: string; text: string; at: string };
+export type Msg = { id: number; mine: boolean; author: string; text: string; at: string; files?: MsgFile[] };
 
 type Me = Pick<User, 'id' | 'name' | 'email' | 'role'>;
-type Thread = { id: string; kind: 'direct' | 'support'; a_id: string; b_id: string | null; a_read: number; b_read: number };
+type Thread = {
+  id: string;
+  kind: 'direct' | 'support';
+  a_id: string;
+  b_id: string | null;
+  a_read: number;
+  b_read: number;
+  a_read_at: Date | null;
+  b_read_at: Date | null;
+};
 /** Доступ к переписке: чья сторона (a или b) и отвечает ли человек от имени поддержки. */
 export type Access = { thread: Thread; side: 'a' | 'b'; staff: boolean };
 
@@ -47,6 +59,14 @@ export function cleanText(v: unknown) {
     .replace(/\n{3,}/g, '\n\n')
     .trim()
     .slice(0, MAX_TEXT);
+}
+
+/** Номера прикреплённых файлов из запроса: без повторов, не больше 10. null — если прислали что-то не то. */
+export function cleanFileIds(v: unknown): string[] | null {
+  if (v === undefined || v === null) return [];
+  if (!Array.isArray(v) || v.length > MAX_FILES) return null;
+  const ids = [...new Set(v)];
+  return ids.every((x) => typeof x === 'string' && /^[0-9a-f-]{36}$/.test(x)) ? (ids as string[]) : null;
 }
 
 /* ───────── Ученики и репетиторы ───────── */
@@ -116,8 +136,11 @@ type ThreadRow = {
   o_role: string | null;
   o_grade: string | null;
   o_email: string | null;
+  last_id: number | null;
   last_text: string | null;
+  last_files: MsgFile[] | null;
   last_sender: string | null;
+  o_read: number;
   unread: number;
 };
 
@@ -125,14 +148,15 @@ export async function listThreads(user: Me): Promise<ThreadItem[]> {
   const rows = await q<ThreadRow>(
     `select t.id, t.kind, t.a_id, t.last_at,
             o.id as o_id, o.name as o_name, o.role as o_role, o.grade as o_grade, o.email as o_email,
-            lm.text as last_text, lm.sender_id as last_sender,
+            lm.id as last_id, lm.text as last_text, lm.files as last_files, lm.sender_id as last_sender,
+            (case when t.a_id = $1 then t.b_read else t.a_read end) as o_read,
             (select count(*) from messages m where m.thread_id = t.id and (case
                when t.a_id = $1 then m.id > t.a_read and m.sender_id is distinct from $1
                when t.kind = 'direct' then m.id > t.b_read and m.sender_id is distinct from $1
                else m.id > t.b_read and m.sender_id = t.a_id end))::int as unread
        from threads t
        left join users o on o.id = (case when t.a_id = $1 then t.b_id else t.a_id end)
-       left join lateral (select m.text, m.sender_id from messages m where m.thread_id = t.id order by m.id desc limit 1) lm on true
+       left join lateral (select m.id, m.text, m.files, m.sender_id from messages m where m.thread_id = t.id order by m.id desc limit 1) lm on true
       where t.a_id = $1 or t.b_id = $1 or ($2 and t.kind = 'support')
       order by t.last_at desc limit 300`,
     [user.id, isAdmin(user)],
@@ -150,8 +174,9 @@ export async function listThreads(user: Me): Promise<ThreadItem[]> {
           : kind === 'inbox'
             ? `Обращение в поддержку · ${r.o_email ?? ''}`
             : personSub({ role: r.o_role, grade: r.o_grade }),
-      lastText: (r.last_text || '').slice(0, 200),
+      lastText: msgPreview(r.last_text || '', r.last_files).slice(0, 200),
       lastMine: r.last_sender === user.id,
+      lastRead: r.last_sender === user.id && (r.last_id ?? 0) <= r.o_read,
       lastAt: iso(r.last_at),
       unread: r.unread,
     };
@@ -183,7 +208,7 @@ export function touch(userId: string) {
 
 /* ───────── Одна переписка ───────── */
 
-const THREAD_COLS = 'id, kind, a_id, b_id, a_read, b_read';
+const THREAD_COLS = 'id, kind, a_id, b_id, a_read, b_read, a_read_at, b_read_at';
 
 export async function openThread(user: Me, id: string): Promise<Access | null> {
   if (!/^[0-9a-f-]{36}$/.test(id)) return null;
@@ -212,7 +237,7 @@ export async function startThread(user: Me, target: { to?: string; support?: boo
   return t ? { thread: t, side: t.a_id === user.id ? 'a' : 'b', staff: false } : { error: 'Не удалось открыть переписку', status: 500 };
 }
 
-type MsgRow = { id: number; sender_id: string | null; text: string; created_at: Date; name: string | null };
+type MsgRow = { id: number; sender_id: string | null; text: string; files: MsgFile[] | null; created_at: Date; name: string | null };
 
 function toMsg(user: Me, acc: Access, r: MsgRow): Msg {
   const mine = r.sender_id === user.id;
@@ -220,7 +245,9 @@ function toMsg(user: Me, acc: Access, r: MsgRow): Msg {
   let author = r.name || 'Пользователь';
   if (fromStaff && !acc.staff) author = 'Поддержка';
   else if (fromStaff) author = `${author} · поддержка`;
-  return { id: r.id, mine, author, text: r.text, at: iso(r.created_at) };
+  const m: Msg = { id: r.id, mine, author, text: r.text, at: iso(r.created_at) };
+  if (Array.isArray(r.files) && r.files.length) m.files = r.files;
+  return m;
 }
 
 /**
@@ -229,33 +256,63 @@ function toMsg(user: Me, acc: Access, r: MsgRow): Msg {
  */
 export async function threadMessages(user: Me, acc: Access, opts: { after?: number; before?: number }) {
   const t = acc.thread;
-  const sel = 'select m.id, m.sender_id, m.text, m.created_at, u.name from messages m left join users u on u.id = m.sender_id';
+  const sel = 'select m.id, m.sender_id, m.text, m.files, m.created_at, u.name from messages m left join users u on u.id = m.sender_id';
   const rows = opts.after
     ? await q<MsgRow>(`${sel} where m.thread_id = $1 and m.id > $2 order by m.id limit 200`, [t.id, opts.after])
     : (await q<MsgRow>(`${sel} where m.thread_id = $1 and ($2 = 0 or m.id < $2) order by m.id desc limit 100`, [t.id, opts.before || 0])).reverse();
   const last = rows.length ? rows[rows.length - 1].id : 0;
   const col = acc.side === 'a' ? 'a_read' : 'b_read';
-  if (!opts.before && last > t[col]) await q(`update threads set ${col} = greatest(${col}, $2) where id = $1`, [t.id, last]);
+  if (!opts.before && last > t[col]) await q(`update threads set ${col} = $2, ${col}_at = now() where id = $1 and ${col} < $2`, [t.id, last]);
+  const seenAt = acc.side === 'a' ? t.b_read_at : t.a_read_at;
   return {
     messages: rows.map((r) => toMsg(user, acc, r)),
-    // До какого сообщения дочитал собеседник — чтобы показать «Прочитано»
+    // До какого сообщения дочитал собеседник и когда — чтобы показать «Прочитано в 14:05»
     seen: acc.side === 'a' ? t.b_read : t.a_read,
+    seenAt: seenAt ? iso(seenAt) : null,
     more: !opts.after && rows.length === 100,
   };
 }
 
-export async function postMessage(user: Me, acc: Access, text: string, req: Request): Promise<Msg> {
+type Posted = { id: number; created_at: Date; files: MsgFile[] | null };
+
+/**
+ * Новое сообщение. fileIds — файлы, которые человек заранее загрузил (POST /api/messages/files):
+ * одним запросом проверяем, что они его и ещё ни к чему не прикреплены, сохраняем сообщение и привязываем файлы.
+ */
+export async function postMessage(user: Me, acc: Access, text: string, fileIds: string[], req: Request): Promise<Msg | { error: string; status: number }> {
   const t = acc.thread;
-  const row = await one<{ id: number; created_at: Date }>(
-    'insert into messages (thread_id, sender_id, text) values ($1, $2, $3) returning id, created_at',
-    [t.id, user.id, text],
-  );
-  if (!row) throw new Error('message not saved');
+  const row = fileIds.length
+    ? await one<Posted>(
+        `with f as (
+           select id, name, mime, size, w, h from message_files
+            where id = any($4::text[]) and uploader_id = $2::text and message_id is null
+            for update
+         ), m as (
+           insert into messages (thread_id, sender_id, text, files)
+           select $1::text, $2::text, $3::text,
+                  (select jsonb_agg(jsonb_strip_nulls(jsonb_build_object('id', id, 'name', name, 'mime', mime, 'size', size, 'w', w, 'h', h))
+                                    order by array_position($4::text[], id)) from f)
+            where (select count(*) from f) = cardinality($4::text[])
+           returning id, created_at, files
+         ), linked as (
+           update message_files set thread_id = $1::text, message_id = (select id from m)
+            where id in (select id from f) and exists (select 1 from m)
+           returning id
+         )
+         select id, created_at, files from m`,
+        [t.id, user.id, text, fileIds],
+      )
+    : await one<Posted>('insert into messages (thread_id, sender_id, text) values ($1, $2, $3) returning id, created_at, files', [t.id, user.id, text]);
+  if (!row) {
+    if (fileIds.length) return { error: 'Файл не найден — прикрепите его ещё раз', status: 400 };
+    throw new Error('message not saved');
+  }
   const col = acc.side === 'a' ? 'a_read' : 'b_read';
-  await q(`update threads set last_at = now(), ${col} = greatest(${col}, $2) where id = $1`, [t.id, row.id]);
+  await q(`update threads set last_at = now(), ${col} = greatest(${col}, $2), ${col}_at = now() where id = $1`, [t.id, row.id]);
   if (t.kind === 'support' && !acc.staff) logEvent('support', { user, req, dedupe: `support:${user.id}` });
-  notifyByMail(user, acc, text, req);
-  return { id: row.id, mine: true, author: user.name, text, at: iso(row.created_at) };
+  const files = Array.isArray(row.files) && row.files.length ? row.files : undefined;
+  notifyByMail(user, acc, text || filesSummary(files), req);
+  return { id: row.id, mine: true, author: user.name, text, at: iso(row.created_at), ...(files ? { files } : {}) };
 }
 
 /* ───────── Письмо о новом сообщении ───────── */

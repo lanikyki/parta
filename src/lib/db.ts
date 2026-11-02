@@ -152,6 +152,26 @@ create index if not exists lessons_owner_idx on lessons(owner_id);
 create index if not exists chat_lesson_idx on chat_messages(lesson_id, created_at);
 create index if not exists events_at_idx on events(at desc);
 create index if not exists events_user_idx on events(user_id, at desc);
+-- Файлы и фото в сообщениях. Пока сообщение не отправлено, у файла нет message_id (такие удаляем через сутки).
+-- a_read_at и b_read_at — когда сторона последний раз дочитала переписку (для «Прочитано в 14:05»).
+alter table messages add column if not exists files jsonb;
+alter table threads add column if not exists a_read_at timestamptz;
+alter table threads add column if not exists b_read_at timestamptz;
+create table if not exists message_files (
+  id text primary key,
+  uploader_id text references users(id) on delete set null,
+  thread_id text references threads(id) on delete cascade,
+  message_id int references messages(id) on delete cascade,
+  name text not null,
+  mime text not null,
+  size int not null,
+  w int,
+  h int,
+  data bytea not null,
+  created_at timestamptz not null default now()
+);
+create index if not exists message_files_msg_idx on message_files(message_id);
+create index if not exists message_files_up_idx on message_files(uploader_id, created_at);
 `;
 
 async function init(): Promise<Client> {
