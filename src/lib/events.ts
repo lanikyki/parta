@@ -11,6 +11,7 @@ export const EVENT_LABELS = {
   lesson_create: 'Создал урок',
   lesson_delete: 'Удалил урок',
   lesson_join: 'Зашёл на урок',
+  lesson_kick: 'Удалил участника из урока',
   ai_chat: 'Вопрос ИИ-помощнику',
   ai_tasks: 'Подбор задач',
   ai_summary: 'Итоги урока',

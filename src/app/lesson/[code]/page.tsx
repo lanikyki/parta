@@ -3,7 +3,7 @@ import { notFound } from 'next/navigation';
 import { LessonClient } from '@/components/room/LessonClient';
 import { aiConfigured } from '@/lib/ai';
 import { getUser } from '@/lib/auth';
-import { lessonByCode } from '@/lib/lessons';
+import { isRemoved, lessonByCode, whoIs } from '@/lib/lessons';
 import { livekitConfigured } from '@/lib/livekit';
 import { og } from '@/lib/og';
 
@@ -20,12 +20,15 @@ export default async function LessonPage({ params }: Props) {
   const lesson = await lessonByCode((await params).code);
   if (!lesson) notFound();
   const user = await getUser();
+  const isOwner = user?.id === lesson.owner_id;
   return (
     <LessonClient
       lesson={{ code: lesson.code, title: lesson.title, subject: lesson.subject, tutor: lesson.owner_name }}
-      user={user ? { name: user.name, isOwner: user.id === lesson.owner_id } : null}
+      user={user ? { name: user.name, isOwner } : null}
       livekit={livekitConfigured()}
       ai={aiConfigured()}
+      removed={!isOwner && (await isRemoved(lesson.id, await whoIs(user)))}
+      locked={isOwner && lesson.locked}
     />
   );
 }

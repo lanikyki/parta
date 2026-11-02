@@ -1,7 +1,8 @@
+import { getUser } from '@/lib/auth';
 import { one, q } from '@/lib/db';
 import { clientIp, fail, json, rateLimit, readBody } from '@/lib/http';
 import { uid } from '@/lib/ids';
-import { lessonByCode } from '@/lib/lessons';
+import { lessonByCode, removedResponse } from '@/lib/lessons';
 
 const MAX_FILE = 6_000_000;
 const MAX_FILES = 300; // картинок на один урок
@@ -20,6 +21,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ code: s
   if (!rateLimit(`asset:${clientIp(req)}`, 40, 600e3)) return fail('Слишком много картинок подряд — подождите пару минут', 429);
   const lesson = await lessonByCode((await params).code);
   if (!lesson) return fail('Урок не найден', 404);
+  const removed = await removedResponse(lesson.id, await getUser(), lesson.owner_id);
+  if (removed) return removed;
   const mime = (req.headers.get('content-type') || '').split(';')[0].trim();
   if (!/^image\/(png|jpeg|webp|gif)$/.test(mime)) return fail('Можно загрузить только изображение');
   const declared = Number(req.headers.get('content-length') || 0);

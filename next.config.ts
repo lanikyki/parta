@@ -27,6 +27,8 @@ const nextConfig: NextConfig = {
     '*.trycloudflare.com',
     '*.ru.tuna.am',
     '*.nl.tuna.am',
+    '*.tuna.free',
+    '*.a.tuna.free',
     '*.tunnelmole.net',
     '*.a.free.pinggy.link',
     '*.local',

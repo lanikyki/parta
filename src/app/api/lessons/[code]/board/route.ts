@@ -1,6 +1,7 @@
+import { getUser } from '@/lib/auth';
 import { one, q, withLock } from '@/lib/db';
 import { body, fail, json } from '@/lib/http';
-import { lessonByCode } from '@/lib/lessons';
+import { lessonByCode, removedResponse } from '@/lib/lessons';
 import { type BoardSnapshot, type Item, type Page, emptyBoard, mergeInto, sanitizeSnapshot } from '@/lib/board/types';
 
 type Ctx = { params: Promise<{ code: string }> };
@@ -19,6 +20,8 @@ async function load(lessonId: string): Promise<BoardSnapshot> {
 export async function GET(_req: Request, { params }: Ctx) {
   const lesson = await lessonByCode((await params).code);
   if (!lesson) return fail('Урок не найден', 404);
+  const removed = await removedResponse(lesson.id, await getUser(), lesson.owner_id);
+  if (removed) return removed;
   return json(await load(lesson.id));
 }
 
@@ -27,6 +30,8 @@ export async function POST(req: Request, { params }: Ctx) {
   const lesson = await lessonByCode((await params).code);
   if (!lesson) return fail('Урок не найден', 404);
   if (Number(req.headers.get('content-length') || 0) > BOARD_MAX) return fail('Слишком большой объём', 413);
+  const removed = await removedResponse(lesson.id, await getUser(), lesson.owner_id);
+  if (removed) return removed;
   const b = await body<{ items: Item[]; pages: Page[] }>(req, BOARD_MAX);
   const patch = sanitizeSnapshot({
     items: Object.fromEntries((Array.isArray(b.items) ? b.items : []).map((i) => [i?.id, i])),

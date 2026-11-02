@@ -1,3 +1,4 @@
+import { guestId, type User } from './auth';
 import { one } from './db';
 import { isLessonCode } from './ids';
 
@@ -13,6 +14,7 @@ export type Lesson = {
   owner_name: string;
   summary: string | null;
   summary_at: Date | null;
+  locked: boolean;
   created_at: Date;
 };
 
@@ -38,4 +40,28 @@ const norm = (s: string) =>
 export function guestName(raw: string, ownerName: string) {
   const name = raw.replace(/\s+/g, ' ').trim() || 'Гость';
   return norm(name) && norm(name) === norm(ownerName) ? `${name} (гость)` : name;
+}
+
+/** Кто это для урока: «u:…» — пользователь с аккаунтом, «g:…» — гость (метка в cookie). null — гость без метки. */
+export async function whoIs(user: Pick<User, 'id'> | null, create = false) {
+  if (user) return `u:${user.id}`;
+  const g = await guestId(create);
+  return g ? `g:${g}` : null;
+}
+
+export const REMOVED_TEXT = 'Репетитор удалил вас из этого урока. Если это ошибка, напишите ему — он может вернуть вас.';
+
+export const LOCKED_TEXT = 'Репетитор закрыл вход в этот урок. Напишите ему — он может открыть вход, тогда обновите страницу.';
+
+/** Удалил ли репетитор этого человека из урока. */
+export async function isRemoved(lessonId: string, who: string | null) {
+  if (!who) return false;
+  return Boolean(await one('select 1 from lesson_bans where lesson_id = $1 and who = $2', [lessonId, who]));
+}
+
+/** Отвечает 403, если репетитор удалил этого человека из урока (для чата, доски и картинок). */
+export async function removedResponse(lessonId: string, user: Pick<User, 'id'> | null, ownerId: string) {
+  if (user?.id === ownerId) return null;
+  if (!(await isRemoved(lessonId, await whoIs(user)))) return null;
+  return Response.json({ error: REMOVED_TEXT, removed: true }, { status: 403 });
 }
