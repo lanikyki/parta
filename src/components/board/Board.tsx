@@ -6,6 +6,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Circle,
+  Copy,
   Ellipsis,
   Eraser,
   FileUp,
@@ -14,6 +15,7 @@ import {
   Hand,
   Highlighter,
   ImagePlus,
+  Keyboard,
   LoaderCircle,
   Maximize2,
   Minus,
@@ -21,6 +23,7 @@ import {
   MoveUpRight,
   PenLine,
   Plus,
+  Printer,
   Redo2,
   Rows3,
   Sigma,
@@ -30,14 +33,16 @@ import {
   Undo2,
   Users,
 } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import type { Room } from 'livekit-client';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { createPortal } from 'react-dom';
 import type { GraphItem, ImageItem, Item, Page, PageBg, ShapeItem, StrokeItem, TextItem } from '@/lib/board/types';
 import { SHEET, livePages } from '@/lib/board/types';
 import { type P, bbox, hit, r1, translate, zSort } from './geom';
 import { fitInSheet, importPdf, uploadImage } from './media';
-import { FormulaModal, GraphModal } from './modals';
-import { ItemView, PageBackground } from './render';
+import { FormulaModal, GraphModal, KeysModal } from './modals';
+import { IdPrefixProvider, ItemView, PageBackground } from './render';
 import { BoardStore, type Me, nextV, useBoardSync } from './sync';
 
 type Tool = 'select' | 'hand' | 'pen' | 'marker' | 'highlighter' | 'eraser' | 'shape' | 'text' | 'laser';
@@ -144,8 +149,12 @@ export function Board({ code, room, me }: { code: string; room: Room | null; me:
   const [color, setColor] = useState(COLORS[1]);
   const [hlColor, setHlColor] = useState(HL_COLORS[0]);
   const [sizeIdx, setSizeIdx] = useState(1);
-  const [menu, setMenu] = useState<null | 'shapes' | 'bg' | 'pages'>(null);
-  const [modal, setModal] = useState<null | 'formula' | 'graph'>(null);
+  const [menu, setMenu] = useState<null | 'shapes' | 'bg' | 'pages' | 'more'>(null);
+  const [modal, setModal] = useState<null | 'formula' | 'graph' | 'keys'>(null);
+  // Листы для печати или сохранения в PDF
+  const [printing, setPrinting] = useState<Page[] | null>(null);
+  const [dropping, setDropping] = useState(false);
+  const dragDepth = useRef(0);
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
 
@@ -175,6 +184,8 @@ export function Board({ code, room, me }: { code: string; room: Room | null; me:
   useLayoutEffect(() => {
     const el = wrapRef.current;
     if (!el) return;
+    // Размер сразу, до первой отрисовки: на телефоне не мелькает панель для компьютера
+    setSize({ w: el.clientWidth, h: el.clientHeight });
     const ro = new ResizeObserver(([e]) => setSize({ w: e.contentRect.width, h: e.contentRect.height }));
     ro.observe(el);
     return () => ro.disconnect();
@@ -599,7 +610,17 @@ export function Board({ code, room, me }: { code: string; room: Room | null; me:
         redo();
         return;
       }
+      if (mod && e.code === 'KeyD' && selected) {
+        e.preventDefault();
+        duplicateRef.current();
+        return;
+      }
       if (mod) return;
+      if (e.key === '?') {
+        e.preventDefault();
+        setModal('keys');
+        return;
+      }
       if ((e.key === 'Delete' || e.key === 'Backspace') && selected) {
         e.preventDefault();
         deleteSelected();
@@ -651,6 +672,16 @@ export function Board({ code, room, me }: { code: string; room: Room | null; me:
     sync.commit(list);
     record(list.map((after) => ({ before: null, after })));
   };
+  /** Копия выделенного чуть правее и ниже (Ctrl+D). */
+  const duplicateSelected = () => {
+    const it = itemsRef.current.find((i) => i.id === selected);
+    if (!it || !canDraw || (it.type === 'image' && it.locked)) return;
+    const copy = { ...translate(it, 24, 24), id: uid(), v: nextV(), by: me.identity } as Item;
+    addItems([copy]);
+    setSelected(copy.id);
+  };
+  const duplicateRef = useRef(duplicateSelected);
+  duplicateRef.current = duplicateSelected;
   const insertFormula = (latex: string) => {
     if (!page) return;
     const w = 640;
@@ -670,14 +701,17 @@ export function Board({ code, room, me }: { code: string; room: Room | null; me:
 
   const fileRef = useRef<HTMLInputElement>(null);
   const pdfRef = useRef<HTMLInputElement>(null);
-  const onImage = async (file?: File) => {
+  /** Картинка на доску: рядом с центром экрана или там, куда её перетащили (at). */
+  const onImage = async (file?: File, at?: P) => {
     if (!file || !page) return;
     setBusy('Загружаю картинку…');
     setError('');
     try {
       const { url, w, h } = await uploadImage(code, file);
       const k = Math.min(1, 720 / w, 560 / h);
-      const p = place(w * k, h * k);
+      const p = at
+        ? { x: clamp(at.x - (w * k) / 2, 10, Math.max(10, SHEET.w - w * k - 10)), y: clamp(at.y - (h * k) / 2, 10, Math.max(10, SHEET.h - h * k - 10)) }
+        : place(w * k, h * k);
       const it: ImageItem = { id: uid(), type: 'image', page: page.id, v: nextV(), by: me.identity, x: r1(p.x), y: r1(p.y), w: r1(w * k), h: r1(h * k), src: url };
       addItems([it]);
       setTool('select');
@@ -687,6 +721,138 @@ export function Board({ code, room, me }: { code: string; room: Room | null; me:
       setBusy('');
     }
   };
+
+  /** Текст из буфера обмена — текстом на лист (формулы между $…$ тоже сработают). */
+  const pasteText = (raw: string) => {
+    if (!page) return;
+    const text = raw.replace(/\r\n?/g, '\n').slice(0, 2000);
+    const lines = text.split('\n');
+    const w = clamp(Math.max(...lines.map((l) => l.length)) * 15 + 40, 240, 900);
+    const p = place(w, Math.min(600, lines.length * 40 + 20));
+    addItems([{ id: uid(), type: 'text', page: page.id, v: nextV(), by: me.identity, x: r1(p.x), y: r1(p.y), w, text, color, fs: 26 }]);
+    setTool('select');
+  };
+  const onImageRef = useRef(onImage);
+  onImageRef.current = onImage;
+  const pasteTextRef = useRef(pasteText);
+  pasteTextRef.current = pasteText;
+
+  // Ctrl+V: картинка из буфера обмена (скриншот, «Копировать изображение») или текст
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => {
+      if (!canDraw || modal || editingRef.current || e.defaultPrevented) return;
+      const t = e.target instanceof HTMLElement ? e.target : null;
+      if (t?.closest('input, textarea, select, [contenteditable="true"]')) return;
+      const dt = e.clipboardData;
+      if (!dt) return;
+      const text = dt.getData('text/plain').trim();
+      const file =
+        [...dt.files].find((f) => f.type.startsWith('image/')) ??
+        [...dt.items].find((i) => i.kind === 'file' && i.type.startsWith('image/'))?.getAsFile() ??
+        undefined;
+      // Word и Excel кладут рядом с текстом ещё и его картинку — тогда вставляем текст
+      if (file && !text) {
+        e.preventDefault();
+        onImageRef.current(file);
+      } else if (text) {
+        e.preventDefault();
+        pasteTextRef.current(text);
+      }
+    };
+    document.addEventListener('paste', onPaste);
+    return () => document.removeEventListener('paste', onPaste);
+  }, [canDraw, modal]);
+
+  // Перетаскивание картинок и PDF прямо на доску
+  const withFiles = (e: React.DragEvent) => canDraw && [...e.dataTransfer.types].includes('Files');
+  const onDropFiles = async (e: React.DragEvent) => {
+    if (!withFiles(e)) return;
+    e.preventDefault();
+    dragDepth.current = 0;
+    setDropping(false);
+    const at = toSheet(local(e));
+    const files = [...e.dataTransfer.files].slice(0, 10);
+    let shift = 0;
+    for (const f of files) {
+      if (f.type === 'application/pdf' || /\.pdf$/i.test(f.name)) await onPdf(f);
+      else if (f.type.startsWith('image/')) {
+        await onImage(f, { x: at.x + shift, y: at.y + shift });
+        shift += 30;
+      } else setError(`«${f.name}» — на доску можно положить только картинку или PDF`);
+    }
+  };
+
+  /** Очистить лист: стереть всё, кроме страниц PDF. Можно отменить. */
+  const clearPage = () => {
+    const list = itemsRef.current.filter((i) => !(i.type === 'image' && i.locked));
+    if (!list.length) return setError('На этом листе пока ничего не нарисовано');
+    if (!confirm('Стереть всё на этом листе? Вернуть можно кнопкой «Отменить» (Ctrl+Z).')) return;
+    const tombs = list.map((it) => ({ ...it, deleted: true, v: nextV() }) as Item);
+    sync.commit(tombs);
+    record(list.map((before, i) => ({ before, after: tombs[i] })));
+    setSelected(null);
+  };
+
+  // Ошибка сама исчезает через несколько секунд (или по щелчку)
+  useEffect(() => {
+    if (!error) return;
+    const t = setTimeout(() => setError(''), 7000);
+    return () => clearTimeout(t);
+  }, [error]);
+
+  // Печать и сохранение в PDF: рисуем листы целиком в отдельном блоке (на экране он скрыт) и открываем печать
+  useEffect(() => {
+    if (!printing) return;
+    let alive = true;
+    const ids = new Set(printing.map((p) => p.id));
+    const srcs = [...new Set(Object.values(store.snap.items).flatMap((i) => (i.type === 'image' && !i.deleted && ids.has(i.page) ? [i.src] : [])))];
+    const done = () => alive && setPrinting(null);
+    (async () => {
+      await Promise.all(
+        srcs.map(
+          (src) =>
+            new Promise((r) => {
+              const im = new Image();
+              im.onload = im.onerror = r;
+              im.src = src;
+            }),
+        ),
+      );
+      await document.fonts?.ready;
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      if (!alive) return;
+      window.addEventListener('afterprint', done, { once: true });
+      window.print();
+    })();
+    return () => {
+      alive = false;
+      window.removeEventListener('afterprint', done);
+    };
+  }, [printing, store]);
+
+  /** Что печатать: сам лист и всё, что нарисовали за его краями (но не дальше ещё одного листа в сторону). */
+  const printBox = (pageId: string) => {
+    let [x0, y0, x1, y1] = [0, 0, SHEET.w, SHEET.h];
+    for (const it of Object.values(store.snap.items)) {
+      if (it.deleted || it.page !== pageId) continue;
+      const b = bbox(it);
+      if (![b.x, b.y, b.w, b.h].every(Number.isFinite)) continue;
+      x0 = Math.min(x0, b.x - 16);
+      y0 = Math.min(y0, b.y - 16);
+      x1 = Math.max(x1, b.x + b.w + 16);
+      y1 = Math.max(y1, b.y + b.h + 16);
+    }
+    [x0, y0, x1, y1] = [Math.max(x0, -SHEET.w), Math.max(y0, -SHEET.h), Math.min(x1, 2 * SHEET.w), Math.min(y1, 2 * SHEET.h)];
+    return `${r1(x0)} ${r1(y0)} ${r1(x1 - x0)} ${r1(y1 - y0)}`;
+  };
+
+  // Пункты меню «Ещё»
+  const moreItems: [string, LucideIcon, () => void][] = [
+    ...(me.isHost ? ([['Очистить лист', Eraser, clearPage]] as [string, LucideIcon, () => void][]) : []),
+    ['Печать или PDF: этот лист', Printer, () => page && setPrinting([page])],
+    ...(pages.length > 1 ? ([['Печать или PDF: все листы', Printer, () => setPrinting(pages)]] as [string, LucideIcon, () => void][]) : []),
+    ...(!compact ? ([['Горячие клавиши', Keyboard, () => setModal('keys')]] as [string, LucideIcon, () => void][]) : []),
+  ];
 
   const insertPagesAfter = (count: number) => {
     const cur = page ?? pages[pages.length - 1];
@@ -769,7 +935,27 @@ export function Board({ code, room, me }: { code: string; room: Room | null; me:
   ];
 
   return (
-    <div ref={wrapRef} className="relative h-full w-full touch-none overflow-hidden bg-[#f1f6f3] select-none">
+    <div
+      ref={wrapRef}
+      className="relative h-full w-full touch-none overflow-hidden bg-[#f1f6f3] select-none"
+      onDragEnter={(e) => {
+        if (!withFiles(e)) return;
+        e.preventDefault();
+        dragDepth.current += 1;
+        setDropping(true);
+      }}
+      onDragOver={(e) => {
+        if (!withFiles(e)) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
+      }}
+      onDragLeave={(e) => {
+        if (!withFiles(e)) return;
+        dragDepth.current = Math.max(0, dragDepth.current - 1);
+        if (!dragDepth.current) setDropping(false);
+      }}
+      onDrop={onDropFiles}
+    >
       {/* Холст */}
       <div
         className="absolute inset-0"
@@ -825,19 +1011,28 @@ export function Board({ code, room, me }: { code: string; room: Room | null; me:
         </svg>
       </div>
 
-      {/* Кнопка удаления выделенного */}
+      {/* Кнопки у выделенного: копия и удаление */}
       {selBox && canDraw && (
-        <button
-          type="button"
-          data-ui
-          onClick={deleteSelected}
-          className="absolute z-10 grid h-8 w-8 place-items-center rounded-full bg-white text-accent-600 shadow-soft hover:bg-accent-soft"
-          style={{ left: view.x + (selBox.x + selBox.w) * k + 2, top: view.y + selBox.y * k - 38 }}
-          aria-label="Удалить"
-          title="Удалить (Delete)"
-        >
-          <Trash2 size={16} />
-        </button>
+        <div data-ui className="absolute z-10 flex gap-1" style={{ left: view.x + (selBox.x + selBox.w) * k - 34, top: view.y + selBox.y * k - 38 }}>
+          <button
+            type="button"
+            onClick={() => duplicateRef.current()}
+            className="grid h-8 w-8 place-items-center rounded-full bg-white text-ink-2 shadow-soft hover:bg-tint hover:text-brand-800"
+            aria-label="Дублировать"
+            title="Дублировать (Ctrl+D)"
+          >
+            <Copy size={15} />
+          </button>
+          <button
+            type="button"
+            onClick={deleteSelected}
+            className="grid h-8 w-8 place-items-center rounded-full bg-white text-accent-600 shadow-soft hover:bg-accent-soft"
+            aria-label="Удалить"
+            title="Удалить (Delete)"
+          >
+            <Trash2 size={16} />
+          </button>
+        </div>
       )}
 
       {/* Редактор текста */}
@@ -1007,19 +1202,24 @@ export function Board({ code, room, me }: { code: string; room: Room | null; me:
         <ToolButton title="Следующий лист" disabled={pageIdx >= pages.length - 1 || followLocked} onClick={() => goPage(1)}>
           <ChevronRight size={19} />
         </ToolButton>
-        {canDraw && compact && (
+        {compact && (
           <div className="relative">
-            <ToolButton title="Листы и фон" active={menu === 'pages'} onClick={() => setMenu(menu === 'pages' ? null : 'pages')}>
+            <ToolButton title={canDraw ? 'Листы и фон' : 'Ещё: печать и PDF'} active={menu === 'pages'} onClick={() => setMenu(menu === 'pages' ? null : 'pages')}>
               <Ellipsis size={19} />
             </ToolButton>
             {menu === 'pages' && (
-              <div className="absolute top-12 left-0 z-20 grid w-52 gap-0.5 rounded-xl bg-white p-1.5 shadow-lift">
+              <div className="absolute top-12 left-0 z-20 grid w-60 gap-0.5 rounded-xl bg-white p-1.5 shadow-lift">
                 {(
                   [
-                    ['Новый лист', Plus, addPage],
-                    ['Загрузить PDF', FileUp, () => pdfRef.current?.click()],
-                    ...(pages.length > 1 ? ([['Удалить лист', Trash2, deletePage]] as const) : []),
-                  ] as const
+                    ...(canDraw
+                      ? ([
+                          ['Новый лист', Plus, addPage],
+                          ['Загрузить PDF', FileUp, () => pdfRef.current?.click()],
+                          ...(pages.length > 1 ? ([['Удалить лист', Trash2, deletePage]] as [string, LucideIcon, () => void][]) : []),
+                        ] as [string, LucideIcon, () => void][])
+                      : []),
+                    ...moreItems,
+                  ] as [string, LucideIcon, () => void][]
                 ).map(([label, Icon, act]) => (
                   <button
                     key={label}
@@ -1028,34 +1228,38 @@ export function Board({ code, room, me }: { code: string; room: Room | null; me:
                       setMenu(null);
                       act();
                     }}
-                    className="flex h-10 items-center gap-2.5 rounded-lg px-2.5 text-[14px] hover:bg-mist"
+                    className="flex min-h-10 items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-[14px] leading-tight hover:bg-mist"
                   >
-                    <Icon size={17} /> {label}
+                    <Icon size={17} className="shrink-0" /> {label}
                   </button>
                 ))}
-                <span className="mx-2 my-1 h-px bg-line" />
-                <span className="px-2.5 pt-0.5 pb-1 text-[12px] text-ink-3">Фон листа</span>
-                <div className="grid grid-cols-4 gap-1 px-1 pb-0.5">
-                  {(
-                    [
-                      ['grid', 'Клетка', Grid3x3],
-                      ['lines', 'Линейка', Rows3],
-                      ['dots', 'Точки', Grip],
-                      ['plain', 'Чистый', Square],
-                    ] as const
-                  ).map(([bg, label, Icon]) => (
-                    <button
-                      key={bg}
-                      type="button"
-                      title={label}
-                      aria-label={label}
-                      onClick={() => setBg(bg)}
-                      className={`grid h-10 place-items-center rounded-lg ${page?.bg === bg ? 'bg-tint text-brand-800' : 'text-ink-2 hover:bg-mist'}`}
-                    >
-                      <Icon size={17} />
-                    </button>
-                  ))}
-                </div>
+                {canDraw && (
+                  <>
+                    <span className="mx-2 my-1 h-px bg-line" />
+                    <span className="px-2.5 pt-0.5 pb-1 text-[12px] text-ink-3">Фон листа</span>
+                    <div className="grid grid-cols-4 gap-1 px-1 pb-0.5">
+                      {(
+                        [
+                          ['grid', 'Клетка', Grid3x3],
+                          ['lines', 'Линейка', Rows3],
+                          ['dots', 'Точки', Grip],
+                          ['plain', 'Чистый', Square],
+                        ] as const
+                      ).map(([bg, label, Icon]) => (
+                        <button
+                          key={bg}
+                          type="button"
+                          title={label}
+                          aria-label={label}
+                          onClick={() => setBg(bg)}
+                          className={`grid h-10 place-items-center rounded-lg ${page?.bg === bg ? 'bg-tint text-brand-800' : 'text-ink-2 hover:bg-mist'}`}
+                        >
+                          <Icon size={17} />
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
               </div>
             )}
           </div>
@@ -1101,6 +1305,30 @@ export function Board({ code, room, me }: { code: string; room: Room | null; me:
               </ToolButton>
             )}
           </>
+        )}
+        {!compact && (
+          <div className="relative">
+            <ToolButton title={me.isHost ? 'Ещё: очистить, печать и PDF, горячие клавиши' : 'Ещё: печать и PDF, горячие клавиши'} active={menu === 'more'} onClick={() => setMenu(menu === 'more' ? null : 'more')}>
+              <Ellipsis size={19} />
+            </ToolButton>
+            {menu === 'more' && (
+              <div className="absolute right-0 bottom-12 z-20 grid w-64 gap-0.5 rounded-xl bg-white p-1.5 shadow-lift">
+                {moreItems.map(([label, Icon, act]) => (
+                  <button
+                    key={label}
+                    type="button"
+                    onClick={() => {
+                      setMenu(null);
+                      act();
+                    }}
+                    className="flex h-10 items-center gap-2.5 rounded-lg px-2.5 text-left text-[14px] hover:bg-mist"
+                  >
+                    <Icon size={17} className="shrink-0" /> {label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         )}
       </div>
 
@@ -1149,7 +1377,7 @@ export function Board({ code, room, me }: { code: string; room: Room | null; me:
       </div>
 
       {/* Статусы */}
-      <div className="pointer-events-none absolute top-16 left-1/2 z-10 grid -translate-x-1/2 justify-items-center gap-2 sm:top-3">
+      <div className={`pointer-events-none absolute top-16 left-1/2 z-10 grid -translate-x-1/2 justify-items-center gap-2 ${me.isHost && room ? '' : 'sm:top-3'}`}>
         {followLocked && <span className="rounded-full bg-brand px-3 py-1.5 text-[13px] font-medium text-white shadow-soft">Репетитор ведёт урок — вы на его листе</span>}
         {!canDraw && <span className="rounded-full bg-white px-3 py-1.5 text-[13px] text-ink-2 shadow-soft">Сейчас рисует только репетитор</span>}
         {busy && (
@@ -1176,6 +1404,35 @@ export function Board({ code, room, me }: { code: string; room: Room | null; me:
       <input ref={pdfRef} type="file" accept="application/pdf" hidden onChange={(e) => (onPdf(e.target.files?.[0]), (e.target.value = ''))} />
       {modal === 'formula' && <FormulaModal onClose={() => setModal(null)} onInsert={insertFormula} />}
       {modal === 'graph' && <GraphModal onClose={() => setModal(null)} onInsert={insertGraph} />}
+      {modal === 'keys' && <KeysModal onClose={() => setModal(null)} />}
+      {dropping && (
+        <div className="pointer-events-none absolute inset-3 z-30 grid place-items-center rounded-[22px] border-2 border-dashed border-brand bg-tint/80 text-center text-brand-800">
+          <div>
+            <ImagePlus size={34} className="mx-auto" />
+            <p className="mt-2 text-[17px] font-medium">Отпустите, чтобы положить на доску</p>
+            <p className="text-[14px] text-ink-2">Картинки — на этот лист, PDF — новыми листами</p>
+          </div>
+        </div>
+      )}
+      {printing &&
+        createPortal(
+          <div className="board-print" aria-hidden="true">
+            {printing.map((p) => (
+              <IdPrefixProvider key={p.id} value={`print-${p.id}-`}>
+                <svg viewBox={printBox(p.id)} className="board-print-sheet" xmlns="http://www.w3.org/2000/svg">
+                  <PageBackground bg={p.bg} />
+                  {Object.values(store.snap.items)
+                    .filter((i) => !i.deleted && i.page === p.id)
+                    .sort(zSort)
+                    .map((it) => (
+                      <ItemView key={it.id} it={it} />
+                    ))}
+                </svg>
+              </IdPrefixProvider>
+            ))}
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }
