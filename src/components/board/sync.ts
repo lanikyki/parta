@@ -29,16 +29,33 @@ export class BoardStore {
 
 export type Me = { identity: string; name: string; isHost: boolean };
 export type Laser = { x: number; y: number; page: string; name: string; t: number };
+export type Cursor = { x: number; y: number; page: string; name: string; c: string; t: number };
+/** Какую часть листа видит ведущий (в координатах листа) — для «Все за мной». */
+export type FollowView = { x: number; y: number; w: number; h: number };
 type Msg =
   | { k: 'ops'; items?: Item[]; pages?: Page[] }
   | { k: 'hello' }
   | { k: 'snap'; data: BoardSnapshot; follow?: Follow; perm?: Perm }
   | { k: 'live'; it: Item }
   | { k: 'laser'; x: number; y: number; page: string; name: string }
-  | { k: 'follow'; on: boolean; page: string }
+  | { k: 'cur'; x: number; y: number; page: string; name: string; c: string }
+  | { k: 'curoff' }
+  | { k: 'follow'; on: boolean; page: string; view?: FollowView }
   | { k: 'perm'; draw: boolean };
-type Follow = { on: boolean; page: string };
+type Follow = { on: boolean; page: string; view?: FollowView };
 type Perm = { draw: boolean };
+
+/** Цвет курсора: у репетитора — фирменный зелёный, у учеников — свой для каждого. */
+const HOST_COLOR = '#0f9b5f';
+const GUEST_COLORS = ['#2563eb', '#7c3aed', '#db2777', '#ea580c', '#0891b2', '#b45309', '#4f46e5', '#e11d48'];
+export function cursorColor(identity: string, host: boolean) {
+  if (host) return HOST_COLOR;
+  let h = 0;
+  for (const ch of identity) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return GUEST_COLORS[h % GUEST_COLORS.length];
+}
+const num = (v: unknown) => typeof v === 'number' && Number.isFinite(v);
+const validView = (v?: FollowView) => (v && [v.x, v.y, v.w, v.h].every(num) && v.w > 0 && v.h > 0 ? v : undefined);
 
 const enc = new TextEncoder();
 const dec = new TextDecoder();
@@ -48,6 +65,22 @@ const byId = <T extends { id: string }>(list: T[] = []) => Object.fromEntries(li
 class LiveStore {
   strokes = new Map<string, { it: Item; t: number }>();
   lasers = new Map<string, Laser>();
+  version = 0;
+  private listeners = new Set<() => void>();
+  subscribe = (fn: () => void) => {
+    this.listeners.add(fn);
+    return () => void this.listeners.delete(fn);
+  };
+  getVersion = () => this.version;
+  bump() {
+    this.version++;
+    this.listeners.forEach((f) => f());
+  }
+}
+
+/** Курсоры других участников. Хранятся отдельно: они меняются часто, а доску из-за них перерисовывать незачем. */
+export class CursorStore {
+  map = new Map<string, Cursor>();
   version = 0;
   private listeners = new Set<() => void>();
   subscribe = (fn: () => void) => {
@@ -74,6 +107,7 @@ export function useBoardSync({ code, room, me, store }: { code: string; room: Ro
   const [follow, setFollowState] = useState<Follow>({ on: false, page: '' });
   const [perm, setPermState] = useState<Perm>({ draw: true });
   const live = useRef(new LiveStore()).current;
+  const cursors = useRef(new CursorStore()).current;
   const liveVersion = useSyncExternalStore(live.subscribe, live.getVersion, live.getVersion);
   const followRef = useRef(follow);
   const permRef = useRef(perm);
@@ -166,6 +200,7 @@ export function useBoardSync({ code, room, me, store }: { code: string; room: Ro
       const ids = [me.identity, ...[...room.remoteParticipants.keys()].filter((id) => id !== from)].sort();
       return ids[0] === me.identity;
     };
+    let answered = false;
     const handle = (msg: Msg, from: string) => {
       switch (msg.k) {
         case 'ops': {
@@ -184,8 +219,9 @@ export function useBoardSync({ code, room, me, store }: { code: string; room: Ro
             );
           break;
         case 'snap':
+          answered = true;
           store.merge(sanitizeSnapshot(msg.data));
-          if (msg.follow && isHost(from)) setFollowState(msg.follow);
+          if (msg.follow && isHost(from)) setFollowState({ on: !!msg.follow.on, page: String(msg.follow.page ?? ''), view: validView(msg.follow.view) });
           if (msg.perm && isHost(from)) setPermState(msg.perm);
           break;
         case 'live':
@@ -196,8 +232,23 @@ export function useBoardSync({ code, room, me, store }: { code: string; room: Ro
           live.lasers.set(from, { x: msg.x, y: msg.y, page: msg.page, name: msg.name, t: Date.now() });
           live.bump();
           break;
+        case 'cur':
+          if (!num(msg.x) || !num(msg.y) || typeof msg.page !== 'string') break;
+          cursors.map.set(from, {
+            x: msg.x,
+            y: msg.y,
+            page: msg.page,
+            name: String(msg.name ?? '').slice(0, 40),
+            c: /^#[0-9a-f]{6}$/i.test(msg.c) ? msg.c : cursorColor(from, isHost(from)),
+            t: Date.now(),
+          });
+          cursors.bump();
+          break;
+        case 'curoff':
+          if (cursors.map.delete(from)) cursors.bump();
+          break;
         case 'follow':
-          if (isHost(from)) setFollowState({ on: msg.on, page: msg.page });
+          if (isHost(from)) setFollowState({ on: msg.on, page: msg.page, view: validView(msg.view) });
           break;
         case 'perm':
           if (isHost(from)) setPermState({ draw: msg.draw });
@@ -212,7 +263,19 @@ export function useBoardSync({ code, room, me, store }: { code: string; room: Ro
         /* повреждённое сообщение — пропускаем */
       }
     };
+    // Ушёл участник — сразу убираем его курсор и указку
+    const onLeft = (p: { identity: string }) => {
+      if (cursors.map.delete(p.identity)) cursors.bump();
+      if (live.lasers.delete(p.identity)) live.bump();
+    };
+    // Пришёл новый участник — ведущий сразу шлёт ему доску и режимы («Все за мной», кто рисует):
+    // его «hello» могло прийти раньше, чем мы узнали о нём, и потеряться
+    const onJoined = (p: { identity: string }) => {
+      if (me.isHost) publish({ k: 'snap', data: store.snap, follow: followRef.current, perm: permRef.current }, { to: [p.identity] });
+    };
     room.on(RoomEvent.DataReceived, onData);
+    room.on(RoomEvent.ParticipantDisconnected, onLeft);
+    room.on(RoomEvent.ParticipantConnected, onJoined);
     try {
       room.registerTextStreamHandler('board-big', async (reader, info) => {
         try {
@@ -224,7 +287,13 @@ export function useBoardSync({ code, room, me, store }: { code: string; room: Ro
     } catch {
       /* уже зарегистрирован */
     }
-    const hello = () => publish({ k: 'hello' });
+    let tries = 0;
+    let retry: ReturnType<typeof setTimeout> | undefined;
+    const hello = () => {
+      publish({ k: 'hello' });
+      // ответа нет — спросим ещё пару раз (если в уроке вообще кто-то есть)
+      if (++tries < 4) retry = setTimeout(() => !answered && room.remoteParticipants.size > 0 && hello(), 2000);
+    };
     if (room.state === 'connected') hello();
     else room.once(RoomEvent.Connected, hello);
     const sweep = setInterval(() => {
@@ -233,9 +302,16 @@ export function useBoardSync({ code, room, me, store }: { code: string; room: Ro
       for (const [id, s] of live.strokes) if (now - s.t > 6000) changed = live.strokes.delete(id) || changed;
       for (const [id, l] of live.lasers) if (now - l.t > 1500) changed = live.lasers.delete(id) || changed;
       if (changed) live.bump();
+      // курсор, от которого давно ничего не приходило (закрыли ноутбук, пропала связь), прячем
+      let gone = false;
+      for (const [id, c] of cursors.map) if (now - c.t > 8000) gone = cursors.map.delete(id) || gone;
+      if (gone) cursors.bump();
     }, 500);
     return () => {
       room.off(RoomEvent.DataReceived, onData);
+      room.off(RoomEvent.ParticipantDisconnected, onLeft);
+      room.off(RoomEvent.ParticipantConnected, onJoined);
+      clearTimeout(retry);
       room.off(RoomEvent.Connected, hello);
       try {
         room.unregisterTextStreamHandler('board-big');
@@ -244,7 +320,7 @@ export function useBoardSync({ code, room, me, store }: { code: string; room: Ro
       }
       clearInterval(sweep);
     };
-  }, [room, me.isHost, me.identity, store, publish, queue, live]);
+  }, [room, me.isHost, me.identity, store, publish, queue, live, cursors]);
 
   /** Применить свои изменения: локально, всем участникам и на сервер. */
   const commit = useCallback(
@@ -262,10 +338,25 @@ export function useBoardSync({ code, room, me, store }: { code: string; room: Ro
     (x: number, y: number, page: string) => publish({ k: 'laser', x, y, page, name: me.name }, { reliable: false }),
     [publish, me.name],
   );
+  /** Свой курсор для остальных: где мышь (или палец) на листе. */
+  const myColor = cursorColor(me.identity, me.isHost);
+  const cursorShown = useRef(false);
+  const sendCursor = useCallback(
+    (x: number, y: number, page: string) => {
+      cursorShown.current = true;
+      publish({ k: 'cur', x, y, page, name: me.name, c: myColor }, { reliable: false });
+    },
+    [publish, me.name, myColor],
+  );
+  const hideCursor = useCallback(() => {
+    if (!cursorShown.current) return;
+    cursorShown.current = false;
+    publish({ k: 'curoff' });
+  }, [publish]);
   const setFollow = useCallback(
-    (on: boolean, page: string) => {
-      setFollowState({ on, page });
-      publish({ k: 'follow', on, page });
+    (on: boolean, page: string, view?: FollowView) => {
+      setFollowState({ on, page, view });
+      publish({ k: 'follow', on, page, view });
     },
     [publish],
   );
@@ -277,5 +368,5 @@ export function useBoardSync({ code, room, me, store }: { code: string; room: Ro
     [publish],
   );
 
-  return { loaded, commit, sendLive, sendLaser, follow, setFollow, perm, setPerm, live, liveVersion };
+  return { loaded, commit, sendLive, sendLaser, sendCursor, hideCursor, cursors, myColor, follow, setFollow, perm, setPerm, live, liveVersion };
 }

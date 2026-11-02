@@ -201,29 +201,74 @@ export const ItemView = memo(function ItemView({ it, onMeasure }: { it: Item; on
     case 'text':
       return <Text it={it} onMeasure={onMeasure} />;
     case 'image':
-      return <image href={it.src} x={it.x} y={it.y} width={it.w} height={it.h} preserveAspectRatio="xMidYMid meet" />;
+      // Страница PDF — с тонкой рамкой, иначе на белой доске не видно, где она кончается
+      return it.locked ? (
+        <>
+          <rect x={it.x} y={it.y} width={it.w} height={it.h} fill="#fff" stroke="#cfd9e3" strokeWidth={1} vectorEffect="non-scaling-stroke" />
+          <image href={it.src} x={it.x} y={it.y} width={it.w} height={it.h} preserveAspectRatio="xMidYMid meet" />
+        </>
+      ) : (
+        <image href={it.src} x={it.x} y={it.y} width={it.w} height={it.h} preserveAspectRatio="xMidYMid meet" />
+      );
     case 'graph':
       return <GraphView it={it} />;
   }
 });
 
-export function PageBackground({ bg }: { bg: PageBg }) {
+/** Шаг клетки и линеек на листе (в единицах листа). */
+export const BG_STEP = 40;
+const BG_COLOR = { grid: '#c3d1df', lines: '#b4c6d9', dots: '#93a8bf' };
+type Box = { x: number; y: number; w: number; h: number };
+
+/**
+ * Фон-тетрадь на весь экран: клетки, линейки или точки без краёв, двигаются и масштабируются вместе с доской.
+ * Рисуем в пикселях экрана, поэтому линии всегда чёткие и видны при любом масштабе.
+ */
+export function ScreenBackground({ bg, s, x, y, w, h }: { bg: PageBg; s: number; x: number; y: number; w: number; h: number }) {
+  const pre = useContext(IdPrefix);
+  if (bg === 'plain' || w <= 0 || h <= 0 || !(s > 0)) return null;
+  let step = BG_STEP * s;
+  // Сильно отдалили — клетки укрупняем, чтобы не сливались в серую сетку
+  while (step < 12) step *= 2;
+  const ox = ((x % step) + step) % step;
+  const oy = ((y % step) + step) % step;
+  if (bg === 'dots') {
+    const id = `${pre}sbg-dots`;
+    return (
+      <g data-bg="dots">
+        <defs>
+          <pattern id={id} patternUnits="userSpaceOnUse" x={ox} y={oy} width={step} height={step}>
+            <circle cx={step / 2} cy={step / 2} r={Math.min(2.2, Math.max(1.3, step / 16))} fill={BG_COLOR.dots} />
+          </pattern>
+        </defs>
+        <rect width={w} height={h} fill={`url(#${id})`} />
+      </g>
+    );
+  }
+  let d = '';
+  if (bg === 'grid') for (let px = ox; px < w; px += step) d += `M${Math.round(px) + 0.5} 0V${h}`;
+  for (let py = oy; py < h; py += step) d += `M0 ${Math.round(py) + 0.5}H${w}`;
+  return <path data-bg={bg} d={d} fill="none" stroke={BG_COLOR[bg]} strokeWidth={1} shapeRendering="crispEdges" />;
+}
+
+/** Фон листа для печати: та же тетрадь, но только в пределах печатаемой области. */
+export function PageBackground({ bg, box = { x: 0, y: 0, ...SHEET } }: { bg: PageBg; box?: Box }) {
   const pre = useContext(IdPrefix);
   return (
     <>
       <defs>
-        <pattern id={`${pre}bg-grid`} width="40" height="40" patternUnits="userSpaceOnUse">
-          <path d="M40 0H0V40" fill="none" stroke="#e2ece7" strokeWidth="1.2" />
+        <pattern id={`${pre}bg-grid`} width={BG_STEP} height={BG_STEP} patternUnits="userSpaceOnUse">
+          <path d={`M${BG_STEP} 0H0V${BG_STEP}`} fill="none" stroke={BG_COLOR.grid} strokeWidth="1.4" />
         </pattern>
-        <pattern id={`${pre}bg-lines`} width="40" height="40" patternUnits="userSpaceOnUse">
-          <path d="M0 39.5H40" fill="none" stroke="#dbe7e1" strokeWidth="1.2" />
+        <pattern id={`${pre}bg-lines`} width={BG_STEP} height={BG_STEP} patternUnits="userSpaceOnUse">
+          <path d={`M0 ${BG_STEP - 0.5}H${BG_STEP}`} fill="none" stroke={BG_COLOR.lines} strokeWidth="1.4" />
         </pattern>
-        <pattern id={`${pre}bg-dots`} width="40" height="40" patternUnits="userSpaceOnUse">
-          <circle cx="20" cy="20" r="1.8" fill="#c9dbd2" />
+        <pattern id={`${pre}bg-dots`} width={BG_STEP} height={BG_STEP} patternUnits="userSpaceOnUse">
+          <circle cx={BG_STEP / 2} cy={BG_STEP / 2} r="2.2" fill={BG_COLOR.dots} />
         </pattern>
       </defs>
-      <rect width={SHEET.w} height={SHEET.h} fill="#fff" />
-      {bg !== 'plain' && <rect width={SHEET.w} height={SHEET.h} fill={`url(#${pre}bg-${bg})`} />}
+      <rect x={box.x} y={box.y} width={box.w} height={box.h} fill="#fff" />
+      {bg !== 'plain' && <rect x={box.x} y={box.y} width={box.w} height={box.h} fill={`url(#${pre}bg-${bg})`} />}
     </>
   );
 }
