@@ -32,6 +32,24 @@ export function MessagesLink({ initial, active }: { initial: number; active: boo
     };
   }, [active]);
 
+  // Число непрочитанных видно и на вкладке браузера: «(2) Сообщения — Парта»
+  useEffect(() => {
+    const strip = (t: string) => t.replace(/^\(\d+\+?\) /, '');
+    const apply = () => {
+      const base = strip(document.title);
+      const next = count > 0 ? `(${count > 99 ? '99+' : count}) ${base}` : base;
+      if (document.title !== next) document.title = next;
+    };
+    apply();
+    // Next.js меняет заголовок при переходах — следим и возвращаем счётчик
+    const mo = new MutationObserver(apply);
+    mo.observe(document.head, { childList: true, subtree: true, characterData: true });
+    return () => {
+      mo.disconnect();
+      document.title = strip(document.title);
+    };
+  }, [count]);
+
   return (
     <Link
       href="/messages"
