@@ -37,9 +37,13 @@ export function strokePath(it: StrokeItem) {
   return pathFromOutline(outline);
 }
 
+// Прежние бледные цвета выделителя почти не были видны — старые записи рисуем новыми цветами
+const HL_OLD: Record<string, string> = { '#ffd43b': '#ffcc00', '#8ce99a': '#22c55e', '#ffa8d5': '#ec4899', '#91c8ff': '#3b82f6' };
+
 function Stroke({ it }: { it: StrokeItem }) {
   const d = useMemo(() => strokePath(it), [it]);
-  if (it.kind === 'highlighter') return <path d={d} fill={it.color} opacity={0.38} style={{ mixBlendMode: 'multiply' }} />;
+  if (it.kind === 'highlighter')
+    return <path d={d} fill={HL_OLD[it.color] ?? it.color} opacity={0.5} style={{ mixBlendMode: 'multiply' }} />;
   return <path d={d} fill={it.color} />;
 }
 

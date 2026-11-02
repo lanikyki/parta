@@ -55,7 +55,8 @@ type Gesture =
 type Editing = { id: string | null; x: number; y: number; w: number; fs: number; color: string; text: string; orig?: TextItem };
 
 const COLORS = ['#0f1f1a', '#12a566', '#2f6bff', '#e5484d', '#ff8a00', '#7c4dff', '#ff4f9a'];
-const HL_COLORS = ['#ffd43b', '#8ce99a', '#ffa8d5', '#91c8ff'];
+// Насыщенные цвета: полупрозрачный выделитель должен быть хорошо виден на белой доске
+const HL_COLORS = ['#ffcc00', '#22c55e', '#ec4899', '#3b82f6', '#f97316'];
 const SIZES: Record<'pen' | 'marker' | 'highlighter' | 'shape' | 'text', number[]> = {
   pen: [2.5, 4.5, 8],
   marker: [8, 13, 20],
