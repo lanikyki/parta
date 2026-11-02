@@ -1,8 +1,17 @@
 'use client';
 
 import { LiveKitRoom, RoomAudioRenderer, StartAudio } from '@livekit/components-react';
-import { ConnectionState, MediaDeviceFailure, Room, type RoomOptions, VideoPresets } from 'livekit-client';
-import { Check, Info, Link2, Mic, MicOff, PenLine, Video, VideoOff } from 'lucide-react';
+import {
+  ConnectionError,
+  ConnectionErrorReason,
+  ConnectionState,
+  DisconnectReason,
+  MediaDeviceFailure,
+  Room,
+  type RoomOptions,
+  VideoPresets,
+} from 'livekit-client';
+import { Check, Info, Link2, Lock, Mic, MicOff, PenLine, UserX, Video, VideoOff } from 'lucide-react';
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { Logo } from '@/components/Logo';
@@ -14,13 +23,38 @@ import { RoomUI } from './RoomUI';
 export type LessonInfo = { code: string; title: string; subject: string | null; tutor: string };
 type Conn = { token: string; url: string; identity: string; name: string; isHost: boolean };
 
+// Качество связи: камера 720p (30 кадров), звук 48 кбит/с с защитой от потерь, экран — 1080p.
+// Собеседнику приходит столько, сколько нужно для размера окна на его экране (с учётом чёткости экрана)
 const ROOM_OPTIONS: RoomOptions = {
-  adaptiveStream: true,
+  adaptiveStream: { pixelDensity: 'screen' },
   dynacast: true,
-  publishDefaults: { simulcast: true, videoSimulcastLayers: [VideoPresets.h180, VideoPresets.h360] },
+  publishDefaults: {
+    simulcast: true,
+    videoEncoding: { maxBitrate: 2_000_000, maxFramerate: 30 },
+    videoSimulcastLayers: [VideoPresets.h180, VideoPresets.h360],
+    audioPreset: { maxBitrate: 48_000 },
+    dtx: true,
+    red: true,
+  },
   videoCaptureDefaults: { resolution: VideoPresets.h720.resolution },
-  audioCaptureDefaults: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+  audioCaptureDefaults: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, voiceIsolation: true },
 };
+
+/** Понятное объяснение, почему не удалось подключиться к видеосвязи. */
+function connectErrorText(e: unknown, isHost: boolean) {
+  if (typeof navigator !== 'undefined' && navigator.onLine === false)
+    return 'Нет подключения к интернету. Проверьте Wi-Fi или мобильный интернет и попробуйте ещё раз.';
+  const msg = (e as Error | null)?.message || '';
+  if (e instanceof ConnectionError && e.reason === ConnectionErrorReason.NotAllowed)
+    return 'Видеосервер не пустил в урок. Обновите страницу и попробуйте снова.';
+  if (/pc connection|peer ?connection|ice/i.test(msg))
+    return isHost
+      ? 'Видео не проходит через сеть. Выключите VPN и попробуйте ещё раз. Если сайт запущен на вашем компьютере и видео не подключается ни у кого — включите UPnP в настройках роутера (подробно — в README, раздел «Видео без VPN»). Доска и чат работают и так.'
+      : 'Видео не проходит через вашу сеть. Так бывает с включённым VPN или в рабочей и школьной сети. Выключите VPN или подключитесь к другой сети (например, раздайте интернет с телефона) и попробуйте ещё раз. Доска и чат работают и так.';
+  return isHost
+    ? 'Видеосервер не отвечает. Если сайт запущен на вашем компьютере, посмотрите окно запуска (npm run share): там написано, что не так. Попробуйте ещё раз или откройте доску и чат без видео.'
+    : 'Видеосервер не отвечает. Проверьте интернет и попробуйте ещё раз через минуту — или откройте доску и чат без видео.';
+}
 
 function CopyInvite({ code }: { code: string }) {
   const [done, setDone] = useState(false);
@@ -54,12 +88,15 @@ function PreJoin({
   error,
   boardOnly,
   fallback,
+  locked,
 }: {
   lesson: LessonInfo;
   user: { name: string; isOwner: boolean } | null;
   onJoin: (name: string, mic: boolean, cam: boolean) => void;
   busy: boolean;
   error: string;
+  /** Репетитор закрыл вход в урок (показываем только ему) */
+  locked?: boolean;
   boardOnly?: (name: string) => void;
   /** Видеосервер недоступен — можно зайти только на доску и в чат */
   fallback?: (name: string) => void;
@@ -175,6 +212,12 @@ function PreJoin({
               else onJoin(name.trim(), mic && !noMic, cam && !noCam && !devError);
             }}
           >
+            {locked && user?.isOwner && (
+              <p className="flex gap-2.5 rounded-xl bg-tint px-4 py-3 text-[15px] text-ink">
+                <Lock size={18} className="mt-0.5 shrink-0 text-brand-700" />
+                Вход в урок закрыт: зайти могут только те, кто уже был на нём. Открыть вход можно в уроке, во вкладке «Участники».
+              </p>
+            )}
             {devNote && !boardOnly && (
               <p className="flex gap-2.5 rounded-xl bg-[#fff4cc] px-4 py-3 text-[15px] text-ink">
                 <Info size={18} className="mt-0.5 shrink-0" />
@@ -228,13 +271,18 @@ export function LessonClient({
   user,
   livekit,
   ai,
+  removed = false,
+  locked = false,
 }: {
   lesson: LessonInfo;
   user: { name: string; isOwner: boolean } | null;
   livekit: boolean;
   ai: boolean;
+  /** Репетитор удалил этого человека из урока */
+  removed?: boolean;
+  locked?: boolean;
 }) {
-  const [stage, setStage] = useState<'prejoin' | 'room' | 'board' | 'left'>('prejoin');
+  const [stage, setStage] = useState<'prejoin' | 'room' | 'board' | 'left' | 'removed'>(removed ? 'removed' : 'prejoin');
   const [conn, setConn] = useState<Conn | null>(null);
   const [room, setRoom] = useState<Room | null>(null);
   const [prefs, setPrefs] = useState({ mic: true, cam: true });
@@ -261,6 +309,8 @@ export function LessonClient({
         body: JSON.stringify({ name }),
       });
       const out = await res.json().catch(() => ({}));
+      if (out.removed) return setStage('removed');
+      if (out.locked) return setError(out.error);
       if (!res.ok) throw new Error(out.error || 'Не удалось подключиться');
       // Чего нет на компьютере — не включаем, чтобы урок не обрывался из-за камеры или микрофона
       const d = await probeDevices();
@@ -268,7 +318,8 @@ export function LessonClient({
       setPrefs({ mic: mic && d.mic, cam: cam && d.cam });
       reported.current.clear();
       setRoom(new Room(ROOM_OPTIONS));
-      setConn(out);
+      // Адрес видеосервера может быть относительным («/» — тот же сайт, что и урок: так работает npm run share)
+      setConn({ ...out, url: new URL(out.url || '/', window.location.href).href });
       setStage('room');
     } catch (e) {
       setError((e as Error).message);
@@ -277,6 +328,24 @@ export function LessonClient({
       setBusy(false);
     }
   }
+
+  if (stage === 'removed')
+    return (
+      <div className="grid min-h-dvh place-items-center bg-mist p-6 text-center">
+        <div className="card max-w-[460px] p-8">
+          <span className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-danger-soft text-danger-600">
+            <UserX size={26} />
+          </span>
+          <h1 className="mt-4 text-2xl font-medium">Репетитор удалил вас из урока</h1>
+          <p className="mt-2 text-ink-2">Зайти снова по этой ссылке не получится. Если это ошибка, напишите репетитору — он может вернуть вас.</p>
+          <div className="mt-6 flex justify-center">
+            <Link href={user ? '/dashboard' : '/'} className="btn btn-primary">
+              {user ? 'В кабинет' : 'На главную'}
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
 
   if (stage === 'left')
     return (
@@ -315,7 +384,7 @@ export function LessonClient({
         audio={prefs.mic}
         video={prefs.cam}
         room={room}
-        onDisconnected={() => setStage('left')}
+        onDisconnected={(reason) => setStage(reason === DisconnectReason.PARTICIPANT_REMOVED ? 'removed' : 'left')}
         onMediaDeviceFailure={(failure, kind) => {
           const name = { [MediaDeviceFailure.NotFound]: 'NotFoundError', [MediaDeviceFailure.PermissionDenied]: 'NotAllowedError', [MediaDeviceFailure.DeviceInUse]: 'NotReadableError' }[
             failure as string
@@ -336,7 +405,7 @@ export function LessonClient({
             setNotice(mediaErrorText(lp.lastCameraError ?? lp.lastMicrophoneError ?? e, kind));
             return;
           }
-          setError('Не удалось подключиться к видеосерверу. Попробуйте ещё раз или откройте доску и чат без видео.');
+          setError(connectErrorText(e, conn.isHost));
           setVideoFailed(true);
           setStage('prejoin');
         }}
@@ -359,6 +428,7 @@ export function LessonClient({
       error={error}
       boardOnly={!livekit ? openBoard : undefined}
       fallback={livekit && videoFailed ? openBoard : undefined}
+      locked={locked}
     />
   );
 }

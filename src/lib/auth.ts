@@ -67,6 +67,24 @@ export async function getUser(): Promise<User | null> {
   );
 }
 
+const GUEST = 'parta_guest';
+const SECURE_GUEST = '__Host-parta_guest';
+
+/**
+ * Постоянная метка гостя (без аккаунта) в этом браузере — чтобы репетитор мог удалить гостя из урока
+ * и тот не вернулся по той же ссылке. create: true — выдать новую, если её ещё нет (только в обработчиках API).
+ */
+export async function guestId(create = false) {
+  const jar = await cookies();
+  const https = await onHttps();
+  const have = jar.get(SECURE_GUEST)?.value || (https && !process.env.DOMAIN ? undefined : jar.get(GUEST)?.value);
+  if (have && /^[A-Za-z0-9_-]{16,64}$/.test(have)) return have;
+  if (!create) return null;
+  const id = crypto.randomBytes(18).toString('base64url');
+  jar.set(https ? SECURE_GUEST : GUEST, id, { httpOnly: true, sameSite: 'lax', secure: https, path: '/', maxAge: 365 * 864e2 });
+  return id;
+}
+
 export async function destroySession() {
   const jar = await cookies();
   for (const token of [jar.get(SECURE_COOKIE)?.value, jar.get(COOKIE)?.value])

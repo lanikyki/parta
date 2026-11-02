@@ -4,51 +4,18 @@
 import { spawn, spawnSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import net from 'node:net';
 import path from 'node:path';
 import { ROOT, addNewSettings, readEnv } from './check.mjs';
+import { startGateway } from './gateway.mjs';
 import { startShare } from './share.mjs';
-import { download, isUp, isWin, openBrowser, say, unpack, waitUp, which } from './util.mjs';
+import { isUp, openBrowser, say, sleep, waitUp } from './util.mjs';
+import { findLiveKit, startShareVideo } from './video.mjs';
 
 process.chdir(ROOT);
 const TOOLS = path.join(ROOT, 'tools');
 const SITE = 'http://localhost:3000';
 const SHARE = process.argv.includes('--share');
-
-async function findLiveKit() {
-  const exe = isWin ? 'livekit-server.exe' : 'livekit-server';
-  const local = path.join(TOOLS, exe);
-  if (fs.existsSync(local)) return local;
-  const found = which('livekit-server');
-  if (found) return found;
-  if (process.platform === 'darwin') {
-    say('Для видео установите LiveKit командой: brew install livekit — и запустите снова.');
-    return null;
-  }
-  const arch = { x64: 'amd64', arm64: 'arm64', arm: 'armv7' }[process.arch];
-  const os = isWin ? 'windows' : 'linux';
-  const manual = `Скачайте вручную: https://github.com/livekit/livekit/releases/latest → файл livekit_..._${os}_${arch || 'amd64'} — и положите ${exe} в папку tools проекта.`;
-  if (!arch) {
-    say(`Не знаю, какой LiveKit нужен для этого компьютера. ${manual}`);
-    return null;
-  }
-  say('Скачиваю видеосервер LiveKit (один раз, около 20 МБ)…');
-  try {
-    const rel = await (await fetch('https://api.github.com/repos/livekit/livekit/releases/latest', { headers: { 'user-agent': 'parta' }, signal: AbortSignal.timeout(20000) })).json();
-    const asset = rel.assets?.find((a) => a.name.includes(`_${os}_${arch}.`));
-    if (!asset) throw new Error('на GitHub нет файла для этой системы');
-    const archive = path.join(TOOLS, asset.name);
-    await download(asset.browser_download_url, archive);
-    const ok = unpack(archive, TOOLS);
-    fs.rmSync(archive, { force: true });
-    if (!ok || !fs.existsSync(local)) throw new Error('не удалось распаковать архив');
-    if (!isWin) fs.chmodSync(local, 0o755);
-    say(`Готово: ${path.relative(ROOT, local)}`);
-    return local;
-  } catch (e) {
-    say(`Не получилось скачать LiveKit (${e.message}). ${manual}`);
-    return null;
-  }
-}
 
 /** Каких библиотек не хватает (или стоят старые версии) — например, после обновления проекта. */
 function missingDeps() {
@@ -81,7 +48,32 @@ function sourceSignature() {
 }
 const BUILD_SIG = path.join(ROOT, '.next', 'parta-build.txt');
 
-async function share(env, children, stop) {
+/** Свободный порт для сайта «за дверью» (обычно 3001). */
+function freePort(from) {
+  return new Promise((resolve) => {
+    const tryPort = (port) => {
+      const srv = net.createServer();
+      srv.once('error', () => tryPort(port + 1));
+      srv.listen(port, '127.0.0.1', () => srv.close(() => resolve(port)));
+    };
+    tryPort(from);
+  });
+}
+
+/** Сообщения сайта — в окно, кроме адресов «Local/Network»: сайт открывают по адресу «двери» (3000) или по ссылке. */
+function relay(stream, out) {
+  let rest = '';
+  stream.setEncoding('utf8');
+  stream.on('data', (chunk) => {
+    const lines = (rest + chunk).split(/\r?\n/);
+    rest = lines.pop() ?? '';
+    for (const l of lines) if (!/^\s*-\s*(Local|Network):/.test(l)) out.write(`${l}\n`);
+  });
+  stream.on('end', () => rest && out.write(`${rest}\n`));
+}
+
+async function share(env, children, stop, cleanups) {
+  let video = null;
   if (await isUp(SITE)) {
     // Режим «для себя» (start-windows, npm run dev) по ссылке не показываем: он медленный,
     // а друг увидел бы служебные подсказки. Для показа нужен свой запуск — собранный сайт.
@@ -118,13 +110,42 @@ async function share(env, children, stop) {
       }
       fs.writeFileSync(BUILD_SIG, sig);
     }
+
+    // Видео: свой видеосервер на этом компьютере (SHARE_VIDEO=cloud — как в .env.local, например LiveKit Cloud)
+    if ((env.SHARE_VIDEO || '').trim().toLowerCase() !== 'cloud') {
+      video = await startShareVideo({ journal: (s) => fs.appendFileSync(path.join(TOOLS, 'share.log'), `${new Date().toISOString()} ${s}\n`) });
+      if (video) {
+        children.push(video.proc);
+        cleanups.push(video.close);
+      } else if (env.LIVEKIT_URL && !/\/\/(localhost|127\.0\.0\.1)(:|\/|$)/.test(env.LIVEKIT_URL)) say(`Видео будет через ${env.LIVEKIT_URL} (из .env.local).`);
+    }
+
+    // Сайт работает «за дверью» на соседнем порту, а дверь на 3000 делит запросы между сайтом и видео
+    const port = await freePort(3001);
     say('\nЗапускаю сайт…\n');
-    const site = spawn('npm run start', { stdio: 'inherit', shell: true });
+    const site = spawn(`npm run start -- -p ${port} -H 127.0.0.1`, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      shell: true,
+      env: { ...process.env, ...(video?.env || {}) },
+    });
+    relay(site.stdout, process.stdout);
+    relay(site.stderr, process.stderr);
     children.push(site);
     site.on('exit', (code) => {
       stop();
       process.exit(code ?? 0);
     });
+    const gate = startGateway({
+      port: 3000,
+      site: { host: '127.0.0.1', port },
+      video: video?.signal,
+      onError: (e) => {
+        say(e.code === 'EADDRINUSE' ? '\nПорт 3000 занят другой программой — закройте её и запустите share-windows.bat снова.' : `\nНе удалось открыть сайт: ${e.message}`);
+        stop();
+        process.exit(1);
+      },
+    });
+    cleanups.push(() => new Promise((r) => gate.close(() => r())));
     if (!(await waitUp(`${SITE}/api/health`, 120000))) {
       say('Сайт не запустился — посмотрите сообщения выше.');
       stop();
@@ -133,10 +154,10 @@ async function share(env, children, stop) {
   }
   const { runChecks } = await import('./check.mjs');
   say('\nПроверка настроек:');
-  await runChecks({ brief: true, autofill: true });
+  await runChecks({ brief: true, autofill: true, skipVideo: Boolean(video) });
 
   // Ссылка для друга: сервисы по очереди, проверка ссылки и присмотр за ней — в share.mjs
-  await startShare({ env, children });
+  await startShare({ env, children, video: video ? 'local' : '' });
 }
 
 /** Копии проекта внутри папки проекта (например, после распаковки архива «внутрь») ломают сборку. */
@@ -205,10 +226,11 @@ async function main() {
   }
   const env = readEnv(envFile) || {};
 
-  // 3. Видеосервер (если в настройках указан локальный)
+  // 3. Видеосервер (если в настройках указан локальный). Для показа другу — свой запуск, в share()
   const children = [];
+  const cleanups = [];
   const lkUrl = env.LIVEKIT_URL || '';
-  if (/\/\/(localhost|127\.0\.0\.1)(:|\/|$)/.test(lkUrl) && env.LIVEKIT_API_KEY && env.LIVEKIT_API_SECRET) {
+  if (!SHARE && /\/\/(localhost|127\.0\.0\.1)(:|\/|$)/.test(lkUrl) && env.LIVEKIT_API_KEY && env.LIVEKIT_API_SECRET) {
     const lkHttp = lkUrl.replace(/^ws/, 'http');
     if (await isUp(lkHttp)) say('Видеосервер уже запущен.');
     else {
@@ -234,15 +256,20 @@ async function main() {
       } catch {}
     }
   };
+  let quitting = false;
   for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
-    process.on(sig, () => {
+    process.on(sig, async () => {
+      if (quitting) return;
+      quitting = true;
+      // Закрываем за собой порты на роутере (не дольше пары секунд)
+      await Promise.race([Promise.allSettled(cleanups.map((f) => f())), sleep(2500)]);
       stop();
       process.exit(0);
     });
   }
 
   // 4. Сайт
-  if (SHARE) return share(env, children, stop);
+  if (SHARE) return share(env, children, stop, cleanups);
   if (await isUp(SITE)) {
     say(`\nСайт уже запущен в другом окне: ${SITE}`);
     if (children.length) say('Видеосервер работает, пока открыто это окно.');
