@@ -2,7 +2,7 @@
 
 import katex from 'katex';
 import { X } from 'lucide-react';
-import { useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { tryCompile } from '@/lib/board/mathexpr';
 import { KATEX_LIMITS } from '@/lib/mathtext';
 import { GRAPH_COLORS, GraphView } from './render';
@@ -161,6 +161,49 @@ export function GraphModal({ onClose, onInsert }: { onClose: () => void; onInser
           Вставить на доску
         </button>
       </div>
+    </Modal>
+  );
+}
+
+const KEYS: [string, string][] = [
+  ['V', 'Выбор: двигать и менять размер'],
+  ['H, пробел', 'Рука: двигать лист'],
+  ['P', 'Ручка'],
+  ['M', 'Маркер'],
+  ['I', 'Выделитель'],
+  ['E', 'Ластик'],
+  ['T', 'Текст (двойной щелчок — изменить)'],
+  ['S', 'Фигуры'],
+  ['L', 'Лазерная указка'],
+  ['Ctrl+Z', 'Отменить'],
+  ['Ctrl+Shift+Z, Ctrl+Y', 'Вернуть'],
+  ['Delete', 'Удалить выделенное'],
+  ['Ctrl+D', 'Дублировать выделенное'],
+  ['Ctrl+V', 'Вставить картинку или текст из буфера'],
+  ['Ctrl + колесо', 'Масштаб'],
+  ['?', 'Эта подсказка'],
+];
+
+/** Подсказка по горячим клавишам (клавиша «?» или меню «Ещё»). */
+export function KeysModal({ onClose }: { onClose: () => void }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+  return (
+    <Modal title="Горячие клавиши" onClose={onClose}>
+      <dl className="grid grid-cols-[auto_1fr] items-center gap-x-4 gap-y-2 text-[15px]">
+        {KEYS.map(([k, v]) => (
+          <Fragment key={k}>
+            <dt className="justify-self-start">
+              <kbd className="rounded-md border border-line bg-mist px-2 py-0.5 font-mono text-[13px] text-ink">{k}</kbd>
+            </dt>
+            <dd className="text-ink-2">{v}</dd>
+          </Fragment>
+        ))}
+      </dl>
+      <p className="mt-4 text-[14px] text-ink-3">Картинки и PDF можно просто перетащить на доску мышкой.</p>
     </Modal>
   );
 }
