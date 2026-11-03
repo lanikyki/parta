@@ -21,7 +21,6 @@ import {
   Ellipsis,
   Link2,
   LoaderCircle,
-  Lock,
   LogOut,
   Maximize2,
   MessageCircle,
@@ -35,7 +34,6 @@ import {
   SendHorizontal,
   Settings,
   Sparkles,
-  UserX,
   Users,
   Video,
   VideoOff,
@@ -50,6 +48,8 @@ import type { Me } from '@/components/board/sync';
 import { renderMarkdown, renderMathText } from '@/lib/mathtext';
 import { shareOrigin, usePublicOrigin } from '@/lib/publicOrigin';
 import { mediaErrorText } from './devices';
+import { MOD_TOPIC, MenuItem, byRank, colorFor, initials, isHostP } from './parts';
+import { People } from './People';
 import type { LessonInfo } from './LessonClient';
 
 type Props = { lesson: LessonInfo; me: Me; ai: boolean; notice?: string; onLeave: () => void };
@@ -72,31 +72,6 @@ type ShellProps = Props & {
 
 /* ───────── Вспомогательное ───────── */
 
-const AVATAR_COLORS = ['#12a566', '#ff5a5f', '#2f6bff', '#7c4dff', '#ff8a00'];
-function colorFor(id: string) {
-  let h = 0;
-  for (const c of id) h = (h * 31 + c.charCodeAt(0)) | 0;
-  return AVATAR_COLORS[Math.abs(h) % AVATAR_COLORS.length];
-}
-const initials = (name: string) =>
-  name
-    .trim()
-    .split(/\s+/)
-    .slice(0, 2)
-    .map((w) => w[0]?.toUpperCase() ?? '')
-    .join('') || '?';
-function isHostP(p: Participant) {
-  try {
-    return JSON.parse(p.metadata || '{}').role === 'host';
-  } catch {
-    return false;
-  }
-}
-const rank = (p: Participant) => (isHostP(p) ? 0 : p.isLocal ? 1 : 2);
-const byRank = (a: Participant, b: Participant) =>
-  rank(a) - rank(b) || (a.joinedAt?.getTime() ?? 0) - (b.joinedAt?.getTime() ?? 0);
-/** Служебные сообщения репетитора участникам (например, «репетитор выключил вам микрофон») */
-const MOD_TOPIC = 'parta-mod';
 const rid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
 const fmtTime = (t: number) => new Date(t).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
 function fmtDur(s: number) {
@@ -336,8 +311,12 @@ function Tiles({ hidden, onInvite, onFocus }: { hidden: boolean; onInvite: () =>
   return (
     <section
       aria-label="Видео участников"
-      className={`${hidden ? 'hidden' : 'flex'} gap-2 overflow-x-auto px-2 pb-2 [grid-area:tiles] lg:grid lg:overflow-visible lg:px-0 lg:pr-3 lg:pb-0 ${
-        sorted.length > 2 ? 'lg:grid-cols-2' : 'lg:grid-cols-1'
+      className={`${hidden ? 'hidden' : 'flex'} gap-2 overflow-x-auto px-2 pb-2 [grid-area:tiles] lg:grid lg:px-0 lg:pr-3 lg:pb-0 ${
+        // На невысоком экране ноутбука два видео встают рядом — иначе чату и участникам почти не остаётся места.
+        // В большой группе видео прокручиваются, а чат и список участников остаются видны.
+        sorted.length > 2
+          ? 'lg:max-h-[max(200px,calc(100dvh_-_360px))] lg:grid-cols-2 lg:overflow-x-hidden lg:overflow-y-auto'
+          : 'lg:grid-cols-1 lg:overflow-visible lg:[@media(max-height:760px)]:grid-cols-2'
       }`}
     >
       {sorted.map((t) => (
@@ -345,248 +324,6 @@ function Tiles({ hidden, onInvite, onFocus }: { hidden: boolean; onInvite: () =>
       ))}
       {sorted.length < 2 && <WaitingTile onInvite={onInvite} />}
     </section>
-  );
-}
-
-type Moderation = { locked: boolean; removed: { who: string; name: string }[] };
-
-/** Окно подтверждения поверх урока. */
-function ConfirmModal({
-  title,
-  text,
-  action,
-  busy,
-  onConfirm,
-  onClose,
-}: {
-  title: string;
-  text: string;
-  action: string;
-  busy: boolean;
-  onConfirm: () => void;
-  onClose: () => void;
-}) {
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
-  return (
-    <div
-      className="fixed inset-0 z-[80] grid place-items-center bg-ink/40 p-3 backdrop-blur-[2px]"
-      onMouseDown={(e) => e.target === e.currentTarget && onClose()}
-    >
-      <div role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" className="pop-in w-full max-w-[440px] rounded-[24px] bg-white p-6 shadow-lift">
-        <h2 id="confirm-title" className="text-[20px] leading-tight font-medium">
-          {title}
-        </h2>
-        <p className="mt-2 text-[15px] text-ink-2">{text}</p>
-        <div className="mt-6 flex justify-end gap-2">
-          <button type="button" className="btn btn-line btn-sm" onClick={onClose} autoFocus>
-            Отмена
-          </button>
-          <button
-            type="button"
-            className="btn btn-sm bg-danger text-white hover:bg-[#d23c41]"
-            onClick={onConfirm}
-            disabled={busy}
-          >
-            {busy ? <LoaderCircle size={16} className="animate-spin" /> : <UserX size={16} />}
-            {action}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function People({
-  participants,
-  me,
-  code,
-  room,
-  showToast,
-}: {
-  participants: Participant[];
-  me: Me;
-  code: string;
-  room: Room;
-  showToast: (t: string) => void;
-}) {
-  const list = [...participants].sort(byRank);
-  const host = me.isHost;
-  const [mod, setMod] = useState<Moderation | null>(null);
-  const [menu, setMenu] = useState<string | null>(null);
-  const [confirm, setConfirm] = useState<{ identity: string; name: string } | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  useEffect(() => {
-    if (!host) return;
-    let off = false;
-    fetch(`/api/lessons/${code}/people`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => !off && d && setMod(d))
-      .catch(() => {});
-    return () => {
-      off = true;
-    };
-  }, [host, code]);
-
-  const act = async (payload: Record<string, unknown>) => {
-    setBusy(true);
-    try {
-      const res = await fetch(`/api/lessons/${code}/people`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      const out = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        showToast(out.error || 'Не получилось — попробуйте ещё раз');
-        return false;
-      }
-      if (typeof out.locked === 'boolean') setMod(out);
-      return true;
-    } catch {
-      showToast('Нет связи с сервером — попробуйте ещё раз');
-      return false;
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const mute = async (p: Participant) => {
-    setMenu(null);
-    if (!(await act({ action: 'mute', identity: p.identity }))) return;
-    showToast(`Микрофон выключен: ${p.name || p.identity}`);
-    // Объясняем участнику, почему выключился микрофон
-    room.localParticipant
-      .publishData(new TextEncoder().encode(JSON.stringify({ type: 'muted' })), {
-        reliable: true,
-        destinationIdentities: [p.identity],
-        topic: MOD_TOPIC,
-      })
-      .catch(() => {});
-  };
-
-  const remove = async () => {
-    if (!confirm) return;
-    if (await act({ action: 'remove', identity: confirm.identity })) showToast(`${confirm.name} больше не в уроке`);
-    setConfirm(null);
-  };
-
-  return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      {host && (
-        <label className="flex cursor-pointer items-start gap-3 border-b border-line px-4.5 py-3">
-          <input
-            type="checkbox"
-            className="mt-1 h-4.5 w-4.5 shrink-0 accent-[var(--color-brand)]"
-            checked={Boolean(mod?.locked)}
-            disabled={!mod || busy}
-            onChange={async (e) => {
-              const locked = e.target.checked;
-              setMod((m) => m && { ...m, locked }); // переключатель срабатывает сразу, не дожидаясь сервера
-              if (await act({ action: 'lock', locked }))
-                showToast(locked ? 'Вход закрыт: новые люди не смогут зайти в урок' : 'Вход открыт: зайти можно по ссылке');
-              else setMod((m) => m && { ...m, locked: !locked });
-            }}
-          />
-          <span className="min-w-0">
-            <span className="flex items-center gap-1.5 text-[15px]">
-              <Lock size={14} className="text-ink-3" /> Закрыть вход в урок
-            </span>
-            <span className="block text-[12px] leading-snug text-ink-3">Новые люди не смогут зайти по ссылке. Кто уже был на уроке — сможет вернуться.</span>
-          </span>
-        </label>
-      )}
-      <ul className="min-h-0 flex-1 space-y-0.5 overflow-y-auto p-2">
-        {list.map((p) => {
-          const name = p.name || p.identity;
-          const manage = host && !p.isLocal && !isHostP(p);
-          return (
-            <li key={p.identity} className="relative flex items-center gap-3 rounded-xl px-2.5 py-2">
-              <span
-                className="grid h-9 w-9 shrink-0 place-items-center rounded-full text-[13px] font-medium text-white"
-                style={{ background: colorFor(p.identity) }}
-              >
-                {initials(name)}
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-[15px]">
-                  {name}
-                  {p.isLocal && <span className="text-ink-3"> · вы</span>}
-                </span>
-                <span className="block text-[12px] text-ink-3">{isHostP(p) ? 'Репетитор' : 'Участник'}</span>
-              </span>
-              {p.isMicrophoneEnabled ? <Mic size={16} className="text-ink-3" /> : <MicOff size={16} className="text-danger" />}
-              {p.isCameraEnabled ? <Video size={16} className="text-ink-3" /> : <VideoOff size={16} className="text-danger" />}
-              {manage && (
-                <button
-                  type="button"
-                  onClick={() => setMenu((m) => (m === p.identity ? null : p.identity))}
-                  aria-label={`Действия: ${name}`}
-                  aria-expanded={menu === p.identity}
-                  className="-mr-1 grid h-9 w-9 shrink-0 place-items-center rounded-full text-ink-2 hover:bg-mist"
-                >
-                  <Ellipsis size={18} />
-                </button>
-              )}
-              {manage && menu === p.identity && (
-                <>
-                  <button type="button" aria-label="Закрыть меню" className="fixed inset-0 z-40 cursor-default" onClick={() => setMenu(null)} />
-                  <div role="menu" aria-label={`Действия: ${name}`} className="pop-in absolute top-12 right-1 z-50 grid w-56 gap-0.5 rounded-2xl bg-white p-1.5 shadow-lift">
-                    <MenuItem role="menuitem" icon={<MicOff size={18} />} onClick={() => mute(p)} disabled={!p.isMicrophoneEnabled || busy}>
-                      {p.isMicrophoneEnabled ? 'Выключить микрофон' : 'Микрофон выключен'}
-                    </MenuItem>
-                    <MenuItem
-                      role="menuitem"
-                      icon={<UserX size={18} className="text-danger" />}
-                      onClick={() => (setMenu(null), setConfirm({ identity: p.identity, name }))}
-                      disabled={busy}
-                      danger
-                    >
-                      Удалить из урока
-                    </MenuItem>
-                  </div>
-                </>
-              )}
-            </li>
-          );
-        })}
-      </ul>
-      {host && mod && mod.removed.length > 0 && (
-        <div className="max-h-[40%] shrink-0 overflow-y-auto border-t border-line p-2">
-          <p className="px-2.5 pt-1 pb-1 text-[12px] font-medium text-ink-3">Удалённые из урока · {mod.removed.length}</p>
-          {mod.removed.map((r) => (
-            <div key={r.who} className="flex items-center gap-3 rounded-xl px-2.5 py-1.5">
-              <span className="min-w-0 flex-1 truncate text-[15px] text-ink-2">{r.name}</span>
-              <button
-                type="button"
-                className="btn btn-line btn-sm shrink-0"
-                disabled={busy}
-                aria-label={`Вернуть в урок: ${r.name}`}
-                onClick={async () => {
-                  if (await act({ action: 'restore', who: r.who })) showToast(`${r.name} снова может зайти в урок`);
-                }}
-              >
-                Вернуть
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-      {confirm && (
-        <ConfirmModal
-          title={`Удалить из урока: ${confirm.name}?`}
-          text="Участник сразу выйдет из урока и не сможет вернуться по ссылке с того же аккаунта или устройства. Передумаете — нажмите «Вернуть» внизу списка. Чтобы не зашёл никто новый, закройте вход в урок."
-          action="Удалить"
-          busy={busy}
-          onConfirm={remove}
-          onClose={() => setConfirm(null)}
-        />
-      )}
-    </div>
   );
 }
 
@@ -1335,35 +1072,6 @@ function RoomShell(props: ShellProps) {
         {toast && <span className="pop-in max-w-[min(92vw,520px)] rounded-2xl bg-ink px-4 py-2.5 text-center text-[14px] text-white shadow-lift">{toast}</span>}
       </div>
     </div>
-  );
-}
-
-function MenuItem({
-  icon,
-  onClick,
-  children,
-  disabled = false,
-  danger = false,
-  role,
-}: {
-  icon: ReactNode;
-  onClick: () => void;
-  children: ReactNode;
-  disabled?: boolean;
-  danger?: boolean;
-  role?: 'menuitem';
-}) {
-  return (
-    <button
-      type="button"
-      role={role}
-      onClick={onClick}
-      disabled={disabled}
-      className={`flex h-11 items-center gap-3 rounded-xl px-3 text-left text-[15px] transition-colors hover:bg-mist disabled:opacity-50 disabled:hover:bg-transparent ${danger ? 'text-danger-600' : 'text-ink'}`}
-    >
-      <span className="text-ink-2">{icon}</span>
-      {children}
-    </button>
   );
 }
 
