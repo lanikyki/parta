@@ -4,7 +4,6 @@ import {
   Brush,
   ChartSpline,
   Circle,
-  Copy,
   Eraser,
   Hand,
   Highlighter,
@@ -21,7 +20,6 @@ import {
   Redo2,
   Sigma,
   Square,
-  Trash2,
   Type,
   Undo2,
   Users,
@@ -33,9 +31,11 @@ import { livePages } from '@/lib/board/types';
 import { type P, bbox, hit, r1, translate, zSort } from './geom';
 import { fitInSheet, importPdf, uploadImage } from './media';
 import { FormulaModal, GraphModal, KeysModal } from './modals';
-import { CursorLayer, toolCursor } from './cursors';
+import { CursorLayer, toolCursor, useShareCursor } from './cursors';
 import { type MenuItem, PagesBar } from './pages-bar';
 import { PrintSheets } from './print';
+import { clampScale, cornerAt, cornerCursor, cornerPt, dragScale, opposite, scaleItem } from './resize';
+import { SelectionBar, SelectionFrame } from './selection';
 import { ItemView, ScreenBackground } from './render';
 import { BoardStore, type Me, nextV, useBoardSync } from './sync';
 import { type Box, type Menu, LaserIcon, ToolButton, contentBox, insetsFor, isCompact, isTwoCol } from './ui';
@@ -49,7 +49,8 @@ type Gesture =
   | { kind: 'shape'; item: ShapeItem }
   | { kind: 'erase'; entries: Map<string, Entry>; last: P }
   | { kind: 'move'; orig: Item; start: P; moved: boolean; cur: Item }
-  | { kind: 'pan'; start: P; view: View }
+  | { kind: 'resize'; orig: Item; box: Box; anchor: P; from: P; moved: boolean; cur: Item }
+  | { kind: 'pan'; start: P; view: View; tap?: string }
   | { kind: 'pinch'; d0: number; m0: P; view: View }
   | { kind: 'laser' };
 type Editing = { id: string | null; x: number; y: number; w: number; fs: number; color: string; text: string; orig?: TextItem };
@@ -273,6 +274,12 @@ export function Board({ code, room, me }: { code: string; room: Room | null; me:
   useEffect(() => {
     setSelected(null);
   }, [page?.id]);
+  useEffect(() => {
+    if (tool !== 'select') setSelected(null);
+  }, [tool]);
+  // Курсор над уголками и над выделенным; крупные уголки, если рисуют пальцем
+  const [hoverCur, setHoverCur] = useState<string | null>(null);
+  const [touchUi, setTouchUi] = useState(false);
 
   // Текст
   const [editing, setEditing] = useState<Editing | null>(null);
@@ -339,61 +346,27 @@ export function Board({ code, room, me }: { code: string; room: Room | null; me:
   const toSheet = (pt: P) => ({ x: r1((pt.x - viewRef.current.x) / viewRef.current.s), y: r1((pt.y - viewRef.current.y) / viewRef.current.s) });
 
   // Свой курсор — остальным: стрелка с именем (не чаще раза в 50 мс; с указкой не нужен)
-  const curPt = useRef<P | null>(null);
-  const curSent = useRef(0);
-  const curTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const touchHide = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const pushCursor = (force = false) => {
-    clearTimeout(curTimer.current);
-    const pt = curPt.current;
-    if (!pt || !page || tool === 'laser' || document.hidden) return;
-    const wait = 50 - (Date.now() - curSent.current);
-    if (!force && wait > 0) {
-      curTimer.current = setTimeout(() => pushCursorRef.current(true), wait);
-      return;
-    }
-    curSent.current = Date.now();
-    const p = toSheet(pt);
-    sync.sendCursor(p.x, p.y, page.id);
-  };
-  const pushCursorRef = useRef(pushCursor);
-  pushCursorRef.current = pushCursor;
-  const { hideCursor } = sync;
-  const dropCursor = useCallback(() => {
-    clearTimeout(curTimer.current);
-    curPt.current = null;
-    hideCursor();
-  }, [hideCursor]);
-  const trackCursor = (e: React.PointerEvent, pt: P) => {
-    clearTimeout(touchHide.current);
-    curPt.current = pt;
-    pushCursor(e.type === 'pointerdown');
-  };
-  // Доску подвинули или открыли другой лист, а мышь стоит — курсор у остальных тоже переезжает
-  useEffect(() => {
-    pushCursorRef.current();
-  }, [view, page?.id]);
-  useEffect(() => {
-    if (tool === 'laser') hideCursor();
-    else pushCursorRef.current(true);
-  }, [tool, hideCursor]);
-  useEffect(() => {
-    // Пока мышь просто лежит на доске, раз в 2,5 с напоминаем, где она: иначе курсор у остальных погаснет
-    const beat = setInterval(() => pushCursorRef.current(true), 2500);
-    const onVis = () => document.hidden && dropCursor();
-    document.addEventListener('visibilitychange', onVis);
-    return () => {
-      clearInterval(beat);
-      document.removeEventListener('visibilitychange', onVis);
-      clearTimeout(curTimer.current);
-      clearTimeout(touchHide.current);
-    };
-  }, [dropCursor]);
+  const { track: trackCursor, drop: dropCursor, touchUp } = useShareCursor({
+    send: sync.sendCursor,
+    hide: sync.hideCursor,
+    page: page?.id,
+    off: tool === 'laser',
+    view,
+    toSheet,
+  });
   const topHit = (p: P, mode: 'select' | 'erase') => {
     const tol = 8 / viewRef.current.s;
     const list = itemsRef.current;
     for (let i = list.length - 1; i >= 0; i--) if (list[i].id !== hiddenId && hit(list[i], p, tol, mode)) return list[i];
     return undefined;
+  };
+  /** Страница PDF под точкой: её выделяют щелчком, а не по линиям, как остальное. */
+  const lockedAt = (p: P) => {
+    const list = itemsRef.current;
+    for (let i = list.length - 1; i >= 0; i--) {
+      const it = list[i];
+      if (it.type === 'image' && it.locked && it.id !== hiddenId && p.x >= it.x && p.x <= it.x + it.w && p.y >= it.y && p.y <= it.y + it.h) return it;
+    }
   };
   const eraseAt = (p: P) => {
     const cur = g.current;
@@ -416,7 +389,7 @@ export function Board({ code, room, me }: { code: string; room: Room | null; me:
   const cancelGesture = () => {
     const cur = g.current;
     g.current = null;
-    if (cur?.kind === 'move') setHiddenId(null);
+    if (cur?.kind === 'move' || cur?.kind === 'resize') setHiddenId(null);
     clearDraft();
   };
 
@@ -430,6 +403,7 @@ export function Board({ code, room, me }: { code: string; room: Room | null; me:
     e.currentTarget.setPointerCapture(e.pointerId);
     const pt = local(e);
     pointers.current.set(e.pointerId, pt);
+    if ((e.pointerType === 'touch') !== touchUi) setTouchUi(e.pointerType === 'touch');
     trackCursor(e, pt);
     if (pointers.current.size === 2) {
       cancelGesture();
@@ -476,14 +450,29 @@ export function Board({ code, room, me }: { code: string; room: Room | null; me:
         eraseAt(p);
         break;
       case 'select': {
+        // Тянут за уголок рамки — меняем размер (пропорционально, противоположный угол на месте)
+        if (canDraw && selectedItem && selectedItem.id !== hiddenId) {
+          const box = bbox(selectedItem);
+          const c = cornerAt(box, viewRef.current, pt, e.pointerType === 'touch' ? 24 : 12);
+          if (c) {
+            g.current = { kind: 'resize', orig: selectedItem, box, anchor: cornerPt(box, opposite(c)), from: cornerPt(box, c), moved: false, cur: selectedItem };
+            break;
+          }
+        }
         const target = canDraw ? topHit(p, 'select') : undefined;
         if (target) {
           setSelected(target.id);
           g.current = { kind: 'move', orig: target, start: p, moved: false, cur: target };
-        } else {
-          setSelected(null);
-          g.current = { kind: 'pan', start: pt, view: viewRef.current };
+          break;
         }
+        // Страница PDF: щелчок выделяет её, перетаскивание двигает лист; выделенную можно и передвинуть
+        const pdf = canDraw ? lockedAt(p) : undefined;
+        if (pdf && pdf.id === selected) {
+          g.current = { kind: 'move', orig: pdf, start: p, moved: false, cur: pdf };
+          break;
+        }
+        setSelected(null);
+        g.current = { kind: 'pan', start: pt, view: viewRef.current, tap: pdf?.id };
         break;
       }
       case 'text': {
@@ -507,6 +496,16 @@ export function Board({ code, room, me }: { code: string; room: Room | null; me:
     if (e.pointerType !== 'touch' || pointers.current.has(e.pointerId)) trackCursor(e, pt);
     if (tool === 'laser' && page && e.pointerType !== 'touch') showLaser(toSheet(pt));
     const cur = g.current;
+    if (!cur && tool === 'select' && e.pointerType === 'mouse') {
+      let hc: string | null = null;
+      if (canDraw && selectedItem && selectedItem.id !== hiddenId) {
+        const b = bbox(selectedItem);
+        const c = cornerAt(b, viewRef.current, pt, 12);
+        const q = toSheet(pt);
+        hc = c ? cornerCursor(c) : q.x >= b.x && q.x <= b.x + b.w && q.y >= b.y && q.y <= b.y + b.h ? 'move' : null;
+      }
+      if (hc !== hoverCur) setHoverCur(hc);
+    }
     if (!cur) return;
     switch (cur.kind) {
       case 'pinch': {
@@ -578,6 +577,15 @@ export function Board({ code, room, me }: { code: string; room: Room | null; me:
         scheduleDraft(cur.cur);
         break;
       }
+      case 'resize': {
+        const k = clampScale(cur.box, dragScale(cur.anchor, cur.from, toSheet(pt)));
+        if (!cur.moved && Math.abs(k - 1) < 0.004) return;
+        if (!cur.moved) setHiddenId(cur.orig.id);
+        cur.moved = true;
+        cur.cur = scaleItem(cur.orig, k, cur.anchor.x, cur.anchor.y);
+        scheduleDraft(cur.cur);
+        break;
+      }
       case 'laser':
         break;
     }
@@ -585,10 +593,7 @@ export function Board({ code, room, me }: { code: string; room: Room | null; me:
 
   const onPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
     pointers.current.delete(e.pointerId);
-    if (e.pointerType === 'touch') {
-      clearTimeout(touchHide.current);
-      touchHide.current = setTimeout(dropCursor, 1500);
-    }
+    if (e.pointerType === 'touch') touchUp();
     const cur = g.current;
     if (!cur) return;
     if (cur.kind === 'pinch') {
@@ -616,7 +621,11 @@ export function Board({ code, room, me }: { code: string; room: Room | null; me:
       case 'erase':
         record([...cur.entries.values()]);
         break;
-      case 'move': {
+      case 'pan':
+        if (cur.tap && Math.hypot(local(e).x - cur.start.x, local(e).y - cur.start.y) < 4) setSelected(cur.tap);
+        break;
+      case 'move':
+      case 'resize': {
         clearDraft();
         setHiddenId(null);
         if (!cur.moved) return;
@@ -683,6 +692,11 @@ export function Board({ code, room, me }: { code: string; room: Room | null; me:
         deleteSelected();
         return;
       }
+      if (selected && ['+', '=', '-', '_'].includes(e.key)) {
+        e.preventDefault();
+        scaleRef.current(e.key === '-' || e.key === '_' ? 1 / 1.25 : 1.25);
+        return;
+      }
       if (e.code === 'Space' && !spaceDown.current) {
         spaceDown.current = true;
         e.preventDefault();
@@ -740,13 +754,28 @@ export function Board({ code, room, me }: { code: string; room: Room | null; me:
   };
   const duplicateRef = useRef(duplicateSelected);
   duplicateRef.current = duplicateSelected;
+  /** Кнопки «−» и «+» (и клавиши): уменьшить или увеличить выделенное, центр остаётся на месте. */
+  const scaleSelected = (f: number) => {
+    const it = itemsRef.current.find((i) => i.id === selected);
+    if (!it || !canDraw) return;
+    const b = bbox(it);
+    const k = clampScale(b, f);
+    if (Math.abs(k - 1) < 0.001) return;
+    const next = { ...scaleItem(it, k, b.x + b.w / 2, b.y + b.h / 2), v: nextV() } as Item;
+    sync.commit([next]);
+    record([{ before: it, after: next }]);
+  };
+  const scaleRef = useRef(scaleSelected);
+  scaleRef.current = scaleSelected;
   const insertFormula = (latex: string) => {
     if (!page) return;
     const w = 640;
     const p = place(w, 90);
-    addItems([{ id: uid(), type: 'text', page: page.id, v: nextV(), by: me.identity, x: r1(p.x), y: r1(p.y), w, text: `$$${latex}$$`, color, fs: 34 }]);
+    const it: TextItem = { id: uid(), type: 'text', page: page.id, v: nextV(), by: me.identity, x: r1(p.x), y: r1(p.y), w, text: `$$${latex}$$`, color, fs: 34 };
+    addItems([it]);
     setModal(null);
     setTool('select');
+    setSelected(it.id);
   };
   const insertGraph = (exprs: string[], range: number) => {
     if (!page) return;
@@ -755,6 +784,7 @@ export function Board({ code, room, me }: { code: string; room: Room | null; me:
     addItems([it]);
     setModal(null);
     setTool('select');
+    setSelected(it.id);
   };
 
   const fileRef = useRef<HTMLInputElement>(null);
@@ -773,6 +803,7 @@ export function Board({ code, room, me }: { code: string; room: Room | null; me:
       const it: ImageItem = { id: uid(), type: 'image', page: page.id, v: nextV(), by: me.identity, x: r1(p.x), y: r1(p.y), w: r1(w * k), h: r1(h * k), src: url };
       addItems([it]);
       setTool('select');
+      setSelected(it.id);
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -787,8 +818,10 @@ export function Board({ code, room, me }: { code: string; room: Room | null; me:
     const lines = text.split('\n');
     const w = clamp(Math.max(...lines.map((l) => l.length)) * 15 + 40, 240, 900);
     const p = place(w, Math.min(600, lines.length * 40 + 20));
-    addItems([{ id: uid(), type: 'text', page: page.id, v: nextV(), by: me.identity, x: r1(p.x), y: r1(p.y), w, text, color, fs: 26 }]);
+    const it: TextItem = { id: uid(), type: 'text', page: page.id, v: nextV(), by: me.identity, x: r1(p.x), y: r1(p.y), w, text, color, fs: 26 };
+    addItems([it]);
     setTool('select');
+    setSelected(it.id);
   };
   const onImageRef = useRef(onImage);
   onImageRef.current = onImage;
@@ -935,7 +968,8 @@ export function Board({ code, room, me }: { code: string; room: Room | null; me:
   const [, setMeasureTick] = useState(0);
   const onMeasure = useCallback(() => setMeasureTick((t) => t + 1), []);
 
-  const selBox = selectedItem && selectedItem.id !== hiddenId ? bbox(selectedItem) : null;
+  const selShown = selectedItem && selectedItem.id === hiddenId ? (draft?.id === hiddenId ? draft : undefined) : selectedItem;
+  const selBox = selShown ? bbox(selShown) : null;
   const k = view.s;
 
   // Меню фигур. На телефоне — над панелями: внутри прокручиваемой строки инструментов его бы обрезало
@@ -1002,7 +1036,7 @@ export function Board({ code, room, me }: { code: string; room: Room | null; me:
       {/* Холст */}
       <div
         className="absolute inset-0"
-        style={{ cursor }}
+        style={{ cursor: (tool === 'select' && hoverCur) || cursor }}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
@@ -1025,19 +1059,7 @@ export function Board({ code, room, me }: { code: string; room: Room | null; me:
               </g>
             ))}
             {draft && <ItemView it={draft} />}
-            {selBox && (
-              <rect
-                x={selBox.x - 6 / k}
-                y={selBox.y - 6 / k}
-                width={selBox.w + 12 / k}
-                height={selBox.h + 12 / k}
-                fill="none"
-                stroke="#12a566"
-                strokeWidth={1.5 / k}
-                strokeDasharray={`${6 / k} ${4 / k}`}
-                rx={6 / k}
-              />
-            )}
+            {selBox && <SelectionFrame box={selBox} k={k} handles={canDraw && tool === 'select'} big={touchUi} />}
             {lasers.map(([id, l]) => (
               <g key={id} transform={`translate(${l.x} ${l.y})`}>
                 <circle r={14 / k} fill="#ff3b45" opacity={0.2} />
@@ -1060,28 +1082,18 @@ export function Board({ code, room, me }: { code: string; room: Room | null; me:
       {/* Курсоры других участников */}
       <CursorLayer store={sync.cursors} page={page?.id} view={view} />
 
-      {/* Кнопки у выделенного: копия и удаление */}
-      {selBox && canDraw && (
-        <div data-ui className="absolute z-10 flex gap-1" style={{ left: view.x + (selBox.x + selBox.w) * k - 34, top: view.y + selBox.y * k - 38 }}>
-          <button
-            type="button"
-            onClick={() => duplicateRef.current()}
-            className="grid h-8 w-8 place-items-center rounded-full bg-white text-ink-2 shadow-soft hover:bg-tint hover:text-brand-800"
-            aria-label="Дублировать"
-            title="Дублировать (Ctrl+D)"
-          >
-            <Copy size={15} />
-          </button>
-          <button
-            type="button"
-            onClick={deleteSelected}
-            className="grid h-8 w-8 place-items-center rounded-full bg-white text-accent-600 shadow-soft hover:bg-accent-soft"
-            aria-label="Удалить"
-            title="Удалить (Delete)"
-          >
-            <Trash2 size={16} />
-          </button>
-        </div>
+      {/* Кнопки у выделенного: меньше, больше, копия, удалить */}
+      {selBox && canDraw && !hiddenId && (
+        <SelectionBar
+          box={selBox}
+          view={view}
+          area={size}
+          ins={insetsFor(size.w, size.h)}
+          locked={selShown?.type === 'image' && !!selShown.locked}
+          onScale={(f) => scaleRef.current(f)}
+          onDuplicate={() => duplicateRef.current()}
+          onDelete={deleteSelected}
+        />
       )}
 
       {/* Редактор текста */}
