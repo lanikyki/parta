@@ -1,8 +1,11 @@
 # Сборка и запуск сайта «Парта» в Docker
 FROM node:22-alpine AS build
 WORKDIR /app
-COPY package.json ./
-RUN npm install --ignore-scripts --no-audit --no-fund
+# Те же версии библиотек, что проверены на компьютере (package-lock.json есть в архиве проекта;
+# если его нет, например в копии с GitHub, — обычная установка)
+COPY package*.json ./
+RUN if [ -f package-lock.json ]; then npm ci --ignore-scripts --no-audit --no-fund; \
+    else npm install --ignore-scripts --no-audit --no-fund; fi
 COPY . .
 RUN node scripts/copy-pdf-worker.cjs && npm run build && npm prune --omit=dev
 

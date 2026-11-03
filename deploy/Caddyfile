@@ -1,12 +1,12 @@
 # Caddy сам получает и продлевает HTTPS-сертификаты.
 {$DOMAIN} {
 	encode zstd gzip
-	reverse_proxy localhost:3000 {
+	reverse_proxy 127.0.0.1:3000 {
 		# ответы ИИ приходят по кусочкам — отдаём их браузеру сразу, ничего не копим
 		flush_interval -1
 	}
 }
 
 {$LIVEKIT_DOMAIN} {
-	reverse_proxy localhost:7880
+	reverse_proxy 127.0.0.1:7880
 }

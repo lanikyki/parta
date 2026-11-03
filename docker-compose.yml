@@ -1,13 +1,17 @@
 # Всё на одном сервере (VPS с Linux): сайт + видеосервер LiveKit + HTTPS через Caddy.
-# Перед запуском: скопируйте .env.example в .env и заполните значения (см. README, вариант Б).
-# Запуск: docker compose up -d --build
+# Проще всего запустить так: sudo bash deploy/setup.sh — скрипт сам заполнит .env и всё запустит.
+# Вручную: скопируйте .env.example в .env, заполните значения (README, вариант Б) и выполните docker compose up -d --build
 services:
   app:
     build: .
     restart: unless-stopped
     env_file: .env
     environment:
+      # Браузеры подключаются к видео через Caddy по HTTPS, а сам сайт — напрямую, внутри сервера
       LIVEKIT_PUBLIC_URL: wss://${LIVEKIT_DOMAIN}
+      LIVEKIT_URL: ws://127.0.0.1:7880
+    # Сайт слушает только внутри сервера: снаружи в него попадают через Caddy (HTTPS)
+    command: ['node_modules/.bin/next', 'start', '-H', '127.0.0.1', '-p', '3000']
     network_mode: host
     volumes:
       - ./data:/app/data
