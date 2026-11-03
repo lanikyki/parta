@@ -1,6 +1,7 @@
 'use client';
 
-import { useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useRef, useSyncExternalStore } from 'react';
+import type { P } from './geom';
 import type { CursorStore } from './sync';
 
 const clamp = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
@@ -86,4 +87,76 @@ export function CursorLayer({ store, page, view }: { store: CursorStore; page?: 
       </div>
     </div>
   );
+}
+
+/**
+ * Делимся своим курсором с остальными: не чаще 20 раз в секунду, а пока мышь просто лежит на доске — раз в 2,5 с
+ * (иначе у остальных курсор погаснет). Прячем, когда мышь ушла с доски, вкладку свернули или взяли лазерную указку.
+ */
+export function useShareCursor(o: {
+  send: (x: number, y: number, page: string) => void;
+  hide: () => void;
+  page?: string;
+  /** Не показывать (лазерная указка видна и так). */
+  off: boolean;
+  /** Доску подвинули — курсор у остальных тоже переезжает. */
+  view: unknown;
+  toSheet: (pt: P) => P;
+}) {
+  const opts = useRef(o);
+  opts.current = o;
+  const pt = useRef<P | null>(null);
+  const sent = useRef(0);
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const touchTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const push = useCallback((force = false) => {
+    clearTimeout(timer.current);
+    const { page, off, send, toSheet } = opts.current;
+    if (!pt.current || !page || off || document.hidden) return;
+    const wait = 50 - (Date.now() - sent.current);
+    if (!force && wait > 0) {
+      timer.current = setTimeout(() => push(true), wait);
+      return;
+    }
+    sent.current = Date.now();
+    const p = toSheet(pt.current);
+    send(p.x, p.y, page);
+  }, []);
+  const drop = useCallback(() => {
+    clearTimeout(timer.current);
+    pt.current = null;
+    opts.current.hide();
+  }, []);
+  const track = useCallback(
+    (e: { type: string }, p: P) => {
+      clearTimeout(touchTimer.current);
+      pt.current = p;
+      push(e.type === 'pointerdown');
+    },
+    [push],
+  );
+  /** С тачскрина: палец убрали — через 1,5 с курсор у остальных гаснет. */
+  const touchUp = useCallback(() => {
+    clearTimeout(touchTimer.current);
+    touchTimer.current = setTimeout(drop, 1500);
+  }, [drop]);
+  useEffect(() => {
+    push();
+  }, [o.view, o.page, push]);
+  useEffect(() => {
+    if (o.off) opts.current.hide();
+    else push(true);
+  }, [o.off, push]);
+  useEffect(() => {
+    const beat = setInterval(() => push(true), 2500);
+    const onVis = () => document.hidden && drop();
+    document.addEventListener('visibilitychange', onVis);
+    return () => {
+      clearInterval(beat);
+      document.removeEventListener('visibilitychange', onVis);
+      clearTimeout(timer.current);
+      clearTimeout(touchTimer.current);
+    };
+  }, [push, drop]);
+  return { track, drop, touchUp };
 }
