@@ -8,11 +8,14 @@ import { InviteLink } from '@/components/app/InviteLink';
 import { CopyLink, DeleteLesson, JoinByCode } from '@/components/app/LessonActions';
 import { LocalTime } from '@/components/app/LocalTime';
 import { TaskGenerator } from '@/components/app/TaskGenerator';
+import { UserAvatar } from '@/components/app/UserAvatar';
 import { type User, getUser } from '@/lib/auth';
 import { isAdmin } from '@/lib/admin';
+import { type AiQuota, aiQuota, subscription, trialOf } from '@/lib/billing';
 import { one, q } from '@/lib/db';
 import { renderMarkdown } from '@/lib/mathtext';
 import { type Contact, ensureInviteCode, listContacts, listThreads, supportEnabled } from '@/lib/messages';
+import { PLANS, TRIAL_MIN, longDate, rub } from '@/lib/plans';
 
 export const metadata: Metadata = { title: 'Личный кабинет' };
 
@@ -102,7 +105,7 @@ async function People({ user }: { user: User }) {
           {shown.map((p: Contact) => (
             <li key={p.id} className="min-w-0">
               <Link href={`/messages?with=${p.id}`} className="group -mx-2 flex items-center gap-3 rounded-xl px-2 py-2 hover:bg-mist">
-                <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-tint font-medium text-brand-800">{(p.name.trim()[0] || '?').toUpperCase()}</span>
+                <UserAvatar name={p.name} src={p.avatar} size={36} />
                 <span className="min-w-0 flex-1">
                   <b className="block truncate text-[15px] font-medium">{p.name}</b>
                   <span className="block truncate text-[13px] text-ink-3">{p.sub}</span>
@@ -178,6 +181,58 @@ function Empty({ children }: { children: React.ReactNode }) {
   return <div className="rounded-[20px] border border-dashed border-line-2 p-8 text-center text-ink-2">{children}</div>;
 }
 
+/** Тариф репетитора: что есть сейчас, пробный урок и вопросы ИИ-помощнику. */
+async function PlanCard({ user, quota }: { user: User; quota: AiQuota }) {
+  const [sub, trial, me] = await Promise.all([
+    subscription(user.id),
+    trialOf(user.id),
+    one<{ phone: string | null }>('select phone from users where id = $1', [user.id]),
+  ]);
+  const left = Math.max(0, quota.chat.limit - quota.chat.used);
+  const plan = sub.plan ? PLANS[sub.plan] : null;
+  return (
+    <section className="card p-6">
+      <div className="flex items-baseline justify-between gap-3">
+        <h2 className="text-lg font-medium">{plan ? `Тариф «${plan.name}»` : 'Бесплатный тариф'}</h2>
+        <Link href="/billing" className="text-[14px] font-medium text-brand-700 hover:underline">
+          {plan ? 'Подписка' : 'Все тарифы'}
+        </Link>
+      </div>
+      <p className="mt-1.5 text-[15px] text-ink-2">
+        {plan && sub.until ? (
+          <>
+            Действует до {longDate(sub.until)}
+            {sub.autorenew ? ', продлится автоматически' : ''}. {plan.video > 2 ? `Видеоуроки до ${plan.video} человек.` : 'Видеоуроки один на один.'}
+          </>
+        ) : trial?.active ? (
+          <>
+            Идёт пробный урок с видео — осталось {Math.max(1, Math.ceil((trial.endsAt - Date.now()) / 60000))} мин.{' '}
+            {trial.code && (
+              <Link href={`/lesson/${trial.code}`} className="font-medium text-brand-700 hover:underline">
+                Вернуться в урок
+              </Link>
+            )}
+          </>
+        ) : trial ? (
+          `Пробный урок с видео уже был. Доска, чат и переписка — бесплатно, а уроки с видео — от ${rub(PLANS.start.price.month)} в месяц.`
+        ) : (
+          me?.phone
+            ? `Первый урок с видео — бесплатно, ${TRIAL_MIN} минут: откройте любой урок и нажмите «Начать пробный урок».`
+            : `Первый урок с видео — бесплатно, ${TRIAL_MIN} минут: начните любой урок. Понадобится один раз подтвердить номер телефона.`
+        )}
+      </p>
+      <p className="mt-3 text-[14px] text-ink-3">
+        ИИ-помощник: осталось {left} из {quota.chat.limit} вопросов в этом месяце
+      </p>
+      {!plan && (
+        <Link href="/billing" className="btn btn-primary mt-4 w-full">
+          Выбрать тариф
+        </Link>
+      )}
+    </section>
+  );
+}
+
 async function TutorView({ user }: { user: User }) {
   const lessons = await q<Row>(
     `select l.code, l.title, l.subject, l.kind, l.starts_at, l.duration_min, l.summary, l.summary_at, l.created_at,
@@ -186,12 +241,13 @@ async function TutorView({ user }: { user: User }) {
       order by coalesce(l.starts_at, l.created_at) desc limit 500`,
     [user.id],
   );
+  const [quota, sub] = await Promise.all([aiQuota(user), subscription(user.id)]);
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_380px]">
       <section>
         <div className="flex items-center justify-between gap-4">
           <h2 className="text-xl font-medium">Мои уроки</h2>
-          <CreateLesson />
+          <CreateLesson plan={sub.plan} />
         </div>
         {lessons.length ? (
           <LessonList lessons={lessons} tutorView />
@@ -204,8 +260,9 @@ async function TutorView({ user }: { user: User }) {
         )}
       </section>
       <aside className="grid content-start gap-6">
+        <PlanCard user={user} quota={quota} />
         <People user={user} />
-        <TaskGenerator />
+        <TaskGenerator quota={quota.extra} />
         <section className="card p-6">
           <h2 className="text-lg font-medium">Как провести урок</h2>
           <ol className="mt-3 grid gap-2.5 text-[15px] text-ink-2">

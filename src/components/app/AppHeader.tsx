@@ -1,14 +1,30 @@
-import { LogOut, Shield } from 'lucide-react';
+import { Shield } from 'lucide-react';
 import Link from 'next/link';
 import { Logo, LogoMark } from '@/components/Logo';
 import { isAdmin } from '@/lib/admin';
 import type { User } from '@/lib/auth';
+import { avatarUrl } from '@/lib/avatar';
+import { subscription } from '@/lib/billing';
 import { gradeLabel } from '@/lib/brand';
 import { unreadTotal } from '@/lib/messages';
+import { PLANS, shortDate } from '@/lib/plans';
 import { MessagesLink } from './MessagesLink';
+import { type MenuUser, UserMenu } from './UserMenu';
 
-export async function AppHeader({ user, active }: { user: User; active?: 'dashboard' | 'assistant' | 'messages' | 'admin' }) {
-  const unread = await unreadTotal(user).catch(() => 0);
+export type HeaderTab = 'dashboard' | 'assistant' | 'messages' | 'admin';
+
+export async function AppHeader({ user, active }: { user: User; active?: HeaderTab }) {
+  const tutor = user.role === 'tutor';
+  const [unread, sub] = await Promise.all([unreadTotal(user).catch(() => 0), tutor ? subscription(user.id).catch(() => null) : null]);
+  const menu: MenuUser = {
+    name: user.name,
+    email: user.email,
+    avatar: user.avatar_at ? avatarUrl(user.id, user.avatar_at) : null,
+    tutor,
+    admin: isAdmin(user),
+    role: tutor ? 'Репетитор' : user.grade ? `Ученик · ${gradeLabel(user.grade).toLowerCase()}` : 'Ученик',
+    plan: tutor ? (sub?.plan ? { id: sub.plan, name: PLANS[sub.plan].name, until: sub.until ? shortDate(sub.until) : null } : { id: 'free', name: 'Бесплатный', until: null }) : null,
+  };
   const link = (href: string, label: React.ReactNode, key: string, aria?: string) => (
     <Link
       href={href}
@@ -31,27 +47,19 @@ export async function AppHeader({ user, active }: { user: User; active?: 'dashbo
           {link('/dashboard', 'Кабинет', 'dashboard')}
           {link('/assistant', 'ИИ-помощник', 'assistant')}
           <MessagesLink initial={unread} active={active === 'messages'} />
-          {isAdmin(user) &&
+          {menu.admin &&
             link(
               '/admin',
               <>
-                <Shield size={19} className="sm:hidden" />
-                <span className="max-sm:sr-only">Админка</span>
+                <Shield size={19} className="lg:hidden" />
+                <span className="max-lg:sr-only">Админка</span>
               </>,
               'admin',
               'Админка',
             )}
         </nav>
-        <div className="ml-auto flex items-center gap-3">
-          <span className="hidden text-right text-[14px] leading-tight md:block">
-            <b className="block font-medium">{user.name}</b>
-            <span className="text-ink-3">{user.role === 'tutor' ? 'Репетитор' : user.grade ? gradeLabel(user.grade) : 'Ученик'}</span>
-          </span>
-          <form action="/api/auth/logout" method="post">
-            <button type="submit" className="grid h-10 w-10 place-items-center rounded-[10px] text-ink-2 hover:bg-mist hover:text-ink" aria-label="Выйти" title="Выйти">
-              <LogOut size={19} />
-            </button>
-          </form>
+        <div className="ml-auto flex items-center">
+          <UserMenu user={menu} />
         </div>
       </div>
     </header>
