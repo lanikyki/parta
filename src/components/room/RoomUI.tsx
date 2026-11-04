@@ -240,7 +240,7 @@ function Tile({ trackRef, onFocus }: { trackRef: TrackReferenceOrPlaceholder; on
   const video = isTrackReference(trackRef) && !camMuted;
 
   return (
-    <div className="@container group/tile relative aspect-video w-[calc(50%-4px)] shrink-0 overflow-hidden rounded-2xl bg-brand-950 sm:w-56 lg:w-auto">
+    <div className="@container group/tile relative aspect-video w-[calc(50%-4px)] shrink-0 overflow-hidden rounded-2xl bg-brand-950 sm:w-56 phone-land:w-full lg:w-auto">
       {video ? (
         <VideoTrack trackRef={trackRef} className={`h-full w-full object-cover ${p.isLocal ? '-scale-x-100' : ''}`} />
       ) : (
@@ -290,7 +290,7 @@ function WaitingTile({ onInvite }: { onInvite: () => void }) {
     <button
       type="button"
       onClick={onInvite}
-      className="group grid aspect-video w-[calc(50%-4px)] shrink-0 place-items-center sm:w-56 rounded-2xl border-[1.5px] border-dashed border-line-2 bg-white text-center transition-colors hover:border-brand hover:bg-tint lg:w-auto"
+      className="group grid aspect-video w-[calc(50%-4px)] shrink-0 place-items-center sm:w-56 phone-land:w-full rounded-2xl border-[1.5px] border-dashed border-line-2 bg-white text-center transition-colors hover:border-brand hover:bg-tint lg:w-auto"
     >
       <span className="px-3">
         <span className="mx-auto grid h-9 w-9 place-items-center rounded-full bg-tint text-brand transition-colors group-hover:bg-white">
@@ -311,7 +311,7 @@ function Tiles({ hidden, onInvite, onFocus }: { hidden: boolean; onInvite: () =>
   return (
     <section
       aria-label="Видео участников"
-      className={`${hidden ? 'hidden' : 'flex'} gap-2 overflow-x-auto px-2 pb-2 [grid-area:tiles] lg:grid lg:px-0 lg:pr-3 lg:pb-0 ${
+      className={`${hidden ? 'hidden' : 'flex'} gap-2 overflow-x-auto px-2 pb-2 [grid-area:tiles] phone-land:w-44 phone-land:flex-col phone-land:overflow-x-hidden phone-land:overflow-y-auto phone-land:pb-2 lg:grid lg:px-0 lg:pr-3 lg:pb-0 ${
         // На невысоком экране ноутбука два видео встают рядом — иначе чату и участникам почти не остаётся места.
         // В большой группе видео прокручиваются, а чат и список участников остаются видны.
         sorted.length > 2

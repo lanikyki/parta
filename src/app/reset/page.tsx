@@ -7,7 +7,7 @@ export const metadata: Metadata = { title: 'Восстановление пар�
 
 export default function ResetPage() {
   return (
-    <AuthShell title="Восстановление пароля" text="Пришлём код на почту — после него можно задать новый пароль.">
+    <AuthShell title="Восстановление пароля" text="Пришлём код на почту — после него можно задать новый пароль.">
       <Suspense>
         <ResetForm />
       </Suspense>
