@@ -72,7 +72,10 @@ function lessonWhen(iso: string | null) {
 }
 
 const TINTS = ['bg-tint text-brand-800', 'bg-accent-soft text-accent-600', 'bg-[#fff4cc] text-ink', 'bg-[#e8eefc] text-[#2b4aa0]', 'bg-[#f3e8fc] text-[#6b2fa0]'];
-function Avatar({ name, support, size = 44 }: { name: string; support?: boolean; size?: number }) {
+function Avatar({ name, support, src, size = 44 }: { name: string; support?: boolean; src?: string | null; size?: number }) {
+  if (src && !support)
+    // eslint-disable-next-line @next/next/no-img-element
+    return <img src={src} alt="" width={size} height={size} className="shrink-0 rounded-full bg-mist object-cover" style={{ width: size, height: size }} />;
   if (support)
     return (
       <span className="grid shrink-0 place-items-center rounded-full bg-brand text-white" style={{ width: size, height: size }}>
@@ -91,7 +94,7 @@ function Avatar({ name, support, size = 44 }: { name: string; support?: boolean;
 async function api<T>(url: string, data?: unknown): Promise<T> {
   const res = await fetch(url, data === undefined ? { cache: 'no-store' } : { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(data) });
   const out = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(out.error || 'Нет связи с сайтом, попробуйте ещё раз');
+  if (!res.ok) throw new Error(out.error || 'Нет связи с сайтом, попробуйте ещё раз');
   return out as T;
 }
 
@@ -185,9 +188,9 @@ export function Messenger(props: Props) {
   const current = openId ? threads.find((t) => t.id === openId) : undefined;
   const header = useMemo(() => {
     if (!sel) return null;
-    if ('to' in sel) return { name: sel.to.name, sub: sel.to.sub, kind: 'direct' as const };
-    if ('support' in sel) return { name: 'Поддержка', sub: 'Вопросы по сайту — ответят администраторы', kind: 'support' as const };
-    return current ? { name: current.name, sub: current.sub, kind: current.kind } : { name: '…', sub: '', kind: 'direct' as const };
+    if ('to' in sel) return { name: sel.to.name, sub: sel.to.sub, kind: 'direct' as const, avatar: sel.to.avatar };
+    if ('support' in sel) return { name: 'Поддержка', sub: 'Вопросы по сайту — ответят администраторы', kind: 'support' as const, avatar: null };
+    return current ? { name: current.name, sub: current.sub, kind: current.kind, avatar: current.avatar } : { name: '…', sub: '', kind: 'direct' as const, avatar: null };
   }, [sel, current]);
 
   const onSent = useCallback(
@@ -205,6 +208,7 @@ export function Messenger(props: Props) {
           lastRead: false,
           lastAt: m.at,
           unread: 0,
+          avatar: header?.avatar ?? null,
         };
         const lastText = msgPreview(m.text, m.files).slice(0, 200);
         return [{ ...base, lastText, lastMine: true, lastRead: false, lastAt: m.at, unread: 0 }, ...list.filter((t) => t.id !== threadId)];
@@ -250,7 +254,7 @@ export function Messenger(props: Props) {
                     onClick={() => setSel({ thread: t.id })}
                     className={`flex w-full items-center gap-3 px-4 py-3 text-left transition-colors ${t.id === openId ? 'bg-tint/70' : 'hover:bg-mist'}`}
                   >
-                    <Avatar name={t.name} support={t.kind === 'support'} />
+                    <Avatar name={t.name} support={t.kind === 'support'} src={t.avatar} />
                     <span className="min-w-0 flex-1">
                       <span className="flex items-baseline gap-2">
                         <b className="truncate font-medium">{t.name}</b>
@@ -292,7 +296,7 @@ export function Messenger(props: Props) {
             className="flex items-center gap-3 border-t border-line px-4 py-3 text-left text-[15px] text-ink-2 transition-colors hover:bg-mist hover:text-ink"
           >
             <LifeBuoy size={18} className="shrink-0 text-brand-700" />
-            Вопрос по сайту? Напишите в поддержку
+            Вопрос по сайту? Напишите в поддержку
           </button>
         )}
       </aside>
@@ -307,6 +311,7 @@ export function Messenger(props: Props) {
             name={header.name}
             sub={header.sub}
             kind={header.kind}
+            avatar={header.avatar}
             me={me}
             lessons={me.role === 'tutor' ? lessons : []}
             mail={mail}
@@ -339,21 +344,21 @@ function EmptyList({ me, invite, contacts, onWrite }: { me: Me; invite: string |
         <p>
           <b className="block text-[17px] font-medium text-ink">Переписок пока нет</b>
           {tutor
-            ? 'Напишите ученику — например, отправьте ссылку на ближайший урок.'
-            : 'Напишите репетитору — например, договоритесь о времени урока.'}
+            ? 'Напишите ученику — например, отправьте ссылку на ближайший урок.'
+            : 'Напишите репетитору — например, договоритесь о времени урока.'}
         </p>
       ) : tutor ? (
         <>
           <p>
-            <b className="block text-[17px] font-medium text-ink">Здесь будет переписка с учениками</b>
-            Ученик появится после первого урока с вами или когда зарегистрируется по вашей ссылке-приглашению.
+            <b className="block text-[17px] font-medium text-ink">Здесь будет переписка с учениками</b>
+            Ученик появится после первого урока с вами или когда зарегистрируется по вашей ссылке-приглашению.
           </p>
           {invite && <InviteLink code={invite} />}
         </>
       ) : (
         <p>
-          <b className="block text-[17px] font-medium text-ink">Здесь будет переписка с репетиторами</b>
-          Репетитор появится после первого урока с ним или когда вы перейдёте по его ссылке-приглашению.
+          <b className="block text-[17px] font-medium text-ink">Здесь будет переписка с репетиторами</b>
+          Репетитор появится после первого урока с ним или когда вы перейдёте по его ссылке-приглашению.
         </p>
       )}
       {contacts.length > 0 && (
@@ -412,7 +417,7 @@ function Picker({
         <div className="min-h-0 flex-1 overflow-y-auto py-2">
           {list.map((c) => (
             <button key={c.id} type="button" onClick={() => onChoose({ to: c })} className="flex w-full items-center gap-3 px-5 py-2.5 text-left hover:bg-mist">
-              <Avatar name={c.name} size={40} />
+              <Avatar name={c.name} src={c.avatar} size={40} />
               <span className="min-w-0">
                 <b className="block truncate font-medium">{c.name}</b>
                 <span className="block truncate text-[13px] text-ink-3">{c.sub}</span>
@@ -423,21 +428,21 @@ function Picker({
             <div className="grid gap-3 px-5 py-3 text-[15px] text-ink-2">
               {me.role === 'tutor' ? (
                 <>
-                  <p>Учеников пока нет. Ученик появится после первого урока с вами или когда зарегистрируется по вашей ссылке-приглашению.</p>
+                  <p>Учеников пока нет. Ученик появится после первого урока с вами или когда зарегистрируется по вашей ссылке-приглашению.</p>
                   {invite && <InviteLink code={invite} />}
                 </>
               ) : (
-                <p>Репетиторов пока нет. Репетитор появится после первого урока с ним или когда вы перейдёте по его ссылке-приглашению.</p>
+                <p>Репетиторов пока нет. Репетитор появится после первого урока с ним или когда вы перейдёте по его ссылке-приглашению.</p>
               )}
             </div>
           )}
-          {contacts.length > 0 && !list.length && <p className="px-5 py-3 text-[15px] text-ink-2">Никого не нашли.</p>}
+          {contacts.length > 0 && !list.length && <p className="px-5 py-3 text-[15px] text-ink-2">Никого не нашли.</p>}
           {support && !me.admin && (
             <button type="button" onClick={() => onChoose({ support: true })} className="mt-1 flex w-full items-center gap-3 border-t border-line px-5 py-3 text-left hover:bg-mist">
               <Avatar name="" support size={40} />
               <span className="min-w-0">
                 <b className="block font-medium">Поддержка</b>
-                <span className="block text-[13px] text-ink-3">Вопросы и проблемы с сайтом</span>
+                <span className="block text-[13px] text-ink-3">Вопросы и проблемы с сайтом</span>
               </span>
             </button>
           )}
@@ -527,9 +532,9 @@ function uploadFile(blob: Blob, name: string, size: { w: number; h: number } | n
         out = JSON.parse(xhr.responseText);
       } catch {}
       if (xhr.status >= 200 && xhr.status < 300 && out.file) resolve(out.file);
-      else reject(new Error(out.error || (xhr.status === 413 ? 'Файл больше 10 МБ' : 'Не удалось загрузить файл')));
+      else reject(new Error(out.error || (xhr.status === 413 ? 'Файл больше 10 МБ' : 'Не удалось загрузить файл')));
     };
-    xhr.onerror = () => reject(new Error('Нет связи с сайтом — файл не загрузился'));
+    xhr.onerror = () => reject(new Error('Нет связи с сайтом — файл не загрузился'));
     xhr.onabort = () => reject(new Error('Загрузка отменена'));
     xhr.send(blob);
   });
@@ -540,9 +545,9 @@ function readWhen(iso: string) {
   const now = new Date();
   const y = new Date(now);
   y.setDate(now.getDate() - 1);
-  if (sameDay(d, now)) return `в ${hhmm(iso)}`;
-  if (sameDay(d, y)) return `вчера в ${hhmm(iso)}`;
-  return `${d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' })} в ${hhmm(iso)}`;
+  if (sameDay(d, now)) return `в ${hhmm(iso)}`;
+  if (sameDay(d, y)) return `вчера в ${hhmm(iso)}`;
+  return `${d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' })} в ${hhmm(iso)}`;
 }
 
 /** Размер одной фотографии в переписке: не шире 300 и не выше 340 точек. */
@@ -629,7 +634,7 @@ function Viewer({ view, local, onClose }: { view: Viewing; local: Map<string, st
     <div className="fixed inset-0 z-[60] flex flex-col bg-[#0b0f14]/92 text-white" role="dialog" aria-modal="true" aria-label="Просмотр фото" onClick={onClose}>
       <div className="flex items-center gap-2 px-3 py-2.5 sm:px-5" onClick={stop}>
         <span className="min-w-0 flex-1 truncate text-[14px] text-white/85">
-          {n > 1 && <b className="mr-2 font-medium text-white">{`${i + 1} из ${n}`}</b>}
+          {n > 1 && <b className="mr-2 font-medium text-white">{`${i + 1} из ${n}`}</b>}
           {f.name} · {fmtSize(f.size)}
         </span>
         <a href={fileUrl(f, true)} download={f.name} className="flex h-10 items-center gap-2 rounded-[10px] px-3 text-[15px] hover:bg-white/10">
@@ -679,6 +684,7 @@ function Chat({
   name,
   sub,
   kind,
+  avatar,
   me,
   lessons,
   mail,
@@ -692,6 +698,7 @@ function Chat({
   name: string;
   sub: string;
   kind: ThreadItem['kind'];
+  avatar: string | null;
   me: Me;
   lessons: LessonLink[];
   mail: boolean;
@@ -826,16 +833,16 @@ function Chat({
     if (!list.length) return;
     const room = MAX_FILES - attsRef.current.length;
     const problems: string[] = [];
-    if (list.length > room) problems.push(`В одном сообщении — не больше ${MAX_FILES} файлов`);
+    if (list.length > room) problems.push(`В одном сообщении — не больше ${MAX_FILES} файлов`);
     const added: Att[] = [];
     for (const file of list.slice(0, Math.max(0, room))) {
       const image = IMAGE_TYPES.includes(file.type) || CONVERT.test(file.type);
       if (!file.size) {
-        problems.push(`«${file.name}» — пустой файл`);
+        problems.push(`«${file.name}» — пустой файл`);
         continue;
       }
       if (file.size > MAX_FILE && !image) {
-        problems.push(`«${file.name}» больше 10 МБ — такой файл не отправить`);
+        problems.push(`«${file.name}» больше 10 МБ — такой файл не отправить`);
         continue;
       }
       const att: Att = { key: ++attSeq, name: file.name || 'Файл', size: file.size, image, url: image ? URL.createObjectURL(file) : undefined, progress: 0 };
@@ -856,7 +863,7 @@ function Chat({
               // Браузер не смог открыть картинку — отправим как обычный файл
             }
           }
-          if (blob.size > MAX_FILE) throw new Error('Файл больше 10 МБ');
+          if (blob.size > MAX_FILE) throw new Error('Файл больше 10 МБ');
           const f = await uploadFile(blob, fname, dims, job, (p) => patch(att.key, { progress: p }));
           patch(att.key, { file: f, progress: 1 });
           return f;
@@ -864,7 +871,7 @@ function Chat({
           const why = (e as Error).message;
           if (why !== 'Загрузка отменена') {
             patch(att.key, { error: why });
-            setError(`Не удалось загрузить «${att.name}»: ${why}`);
+            setError(`Не удалось загрузить «${att.name}»: ${why}`);
           }
           return null;
         }
@@ -910,7 +917,7 @@ function Chat({
     const list = attsRef.current;
     if ((!text && !list.length) || sending) return;
     if (list.some((a) => a.error)) {
-      setError('Уберите файлы, которые не загрузились (красные), и прикрепите их ещё раз');
+      setError('Уберите файлы, которые не загрузились (красные), и прикрепите их ещё раз');
       return;
     }
     setError('');
@@ -922,7 +929,7 @@ function Chat({
     let files: (MsgFile | null)[] = [];
     try {
       files = await Promise.all(list.map((a) => jobs.current.get(a.key)?.done ?? Promise.resolve(a.file ?? null)));
-      if (files.some((f) => !f)) throw new Error('Не все файлы загрузились — прикрепите их ещё раз');
+      if (files.some((f) => !f)) throw new Error('Не все файлы загрузились — прикрепите их ещё раз');
       const ids = files.map((f) => f!.id);
       const out = await api<{ id?: string; message: Msg }>(
         threadId ? `/api/messages/${threadId}` : '/api/messages',
@@ -939,7 +946,7 @@ function Chat({
       setDraft((d) => d || text);
       // Возвращаем файлы в поле ввода: загруженные можно отправить ещё раз
       setAtts((cur) => [
-        ...list.map((a, i) => (files[i] ? { ...a, file: files[i]!, progress: 1, error: undefined } : files.length ? { ...a, error: a.error || 'Не загрузился' } : a)),
+        ...list.map((a, i) => (files[i] ? { ...a, file: files[i]!, progress: 1, error: undefined } : files.length ? { ...a, error: a.error || 'Не загрузился' } : a)),
         ...cur,
       ]);
     } finally {
@@ -992,7 +999,7 @@ function Chat({
         <button type="button" onClick={onBack} className="grid h-10 w-10 shrink-0 place-items-center rounded-[10px] text-ink-2 hover:bg-mist lg:hidden" aria-label="К списку переписок">
           <ArrowLeft size={20} />
         </button>
-        <Avatar name={name} support={kind === 'support'} size={40} />
+        <Avatar name={name} support={kind === 'support'} src={avatar} size={40} />
         <span className="min-w-0">
           <b className="block truncate font-medium">{name}</b>
           <span className="block truncate text-[13px] text-ink-3">{sub}</span>
@@ -1024,8 +1031,8 @@ function Chat({
           <div className="grid h-full place-items-center p-4 text-center text-[15px] text-ink-2">
             <p className="max-w-[380px]">
               {kind === 'support'
-                ? 'Опишите вопрос или проблему — администратор сайта ответит здесь же. Можно приложить скриншот.'
-                : `Сообщений пока нет. Напишите первым — ${name} увидит сообщение в разделе «Сообщения»${mail ? ' и получит письмо на почту' : ''}.`}
+                ? 'Опишите вопрос или проблему — администратор сайта ответит здесь же. Можно приложить скриншот.'
+                : `Сообщений пока нет. Напишите первым — ${name} увидит сообщение в разделе «Сообщения»${mail ? ' и получит письмо на почту' : ''}.`}
             </p>
           </div>
         ) : (
@@ -1068,7 +1075,7 @@ function Chat({
                   {m === lastMine && i === msgs.length - 1 && (
                     <span className={`flex items-center justify-end gap-1 pr-1 text-[12px] ${read ? 'text-brand-700' : 'text-ink-3'}`} data-read={read ? '1' : '0'}>
                       {read ? <CheckCheck size={14} /> : <Check size={14} />}
-                      {read ? (seenAt ? `Прочитано ${readWhen(seenAt)}` : 'Прочитано') : 'Не прочитано'}
+                      {read ? (seenAt ? `Прочитано ${readWhen(seenAt)}` : 'Прочитано') : 'Не прочитано'}
                     </span>
                   )}
                 </li>
@@ -1202,7 +1209,7 @@ function Chat({
           </button>
         </div>
         <p className="mt-1.5 hidden px-1 text-[12px] text-ink-3 sm:block">
-          Enter — отправить, Shift+Enter — новая строка. Фото и файлы — скрепкой, перетаскиванием или Ctrl+V. Формулы — между знаками $: $x^2$.
+          Enter — отправить, Shift+Enter — новая строка. Фото и файлы — скрепкой, перетаскиванием или Ctrl+V. Формулы — между знаками $: $x^2$.
           {draft.length > MAX - 200 ? ` Осталось ${MAX - draft.length} символов.` : ''}
         </p>
       </form>
@@ -1212,7 +1219,7 @@ function Chat({
           <div>
             <Paperclip size={34} className="mx-auto" />
             <p className="mt-2 text-[17px] font-medium">Отпустите, чтобы прикрепить</p>
-            <p className="text-[14px] text-ink-2">Фото и файлы до 10 МБ, не больше {MAX_FILES} за раз</p>
+            <p className="text-[14px] text-ink-2">Фото и файлы до 10 МБ, не больше {MAX_FILES} за раз</p>
           </div>
         </div>
       )}
@@ -1237,7 +1244,7 @@ function LessonButton({ lessons, onPick }: { lessons: LessonLink[]; onPick: (l: 
         onClick={() => setOpen((v) => !v)}
         className={`grid h-11 w-11 place-items-center rounded-full transition-colors ${open ? 'bg-tint text-brand-800' : 'text-ink-2 hover:bg-mist hover:text-ink'}`}
         aria-label="Вставить ссылку на урок"
-        title="Ссылка на урок"
+        title="Ссылка на урок"
       >
         <Video size={20} />
       </button>
@@ -1247,7 +1254,7 @@ function LessonButton({ lessons, onPick }: { lessons: LessonLink[]; onPick: (l: 
           aria-label="Вставить ссылку на урок"
           className="absolute bottom-full left-0 z-20 mb-2 max-h-[min(60dvh,420px)] w-[320px] max-w-[calc(100vw-24px)] overflow-y-auto rounded-2xl border border-line bg-white p-1.5 shadow-lift"
         >
-          <p className="px-3 pt-1.5 pb-1 text-[13px] text-ink-3">Вставить ссылку на урок</p>
+          <p className="px-3 pt-1.5 pb-1 text-[13px] text-ink-3">Вставить ссылку на урок</p>
           {lessons.map((l) => (
             <button
               key={l.code}
