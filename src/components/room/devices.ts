@@ -53,3 +53,24 @@ export function missingText(d: Devices, wantMic: boolean, wantCam: boolean) {
   if (noMic) return 'Микрофон не найден — вас не слышно. Можно писать в чат; подключите микрофон и включите его кнопкой внизу.';
   return '';
 }
+
+/** Где хранится выбранная камера и микрофон (страница «Настройки» и урок) — в следующий раз урок возьмёт их. */
+export const CAM_KEY = 'parta-cam';
+export const MIC_KEY = 'parta-mic';
+
+export function savedDevice(k: string) {
+  try {
+    return localStorage.getItem(k) || '';
+  } catch {
+    return '';
+  }
+}
+
+export function saveDevice(k: string, v: string) {
+  try {
+    if (v) localStorage.setItem(k, v);
+    else localStorage.removeItem(k);
+  } catch {
+    /* приватный режим браузера */
+  }
+}

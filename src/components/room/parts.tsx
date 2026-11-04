@@ -18,6 +18,16 @@ export const initials = (name: string) =>
     .slice(0, 2)
     .map((w) => w[0]?.toUpperCase() ?? '')
     .join('') || '?';
+/** Фото профиля участника (из метаданных пропуска в урок) — только с нашего сайта. */
+export function avatarOf(p: Participant): string | null {
+  try {
+    const a = JSON.parse(p.metadata || '{}').avatar;
+    return typeof a === 'string' && /^\/api\/avatar\/[\w-]+(\?v=[a-z0-9]+)?$/.test(a) ? a : null;
+  } catch {
+    return null;
+  }
+}
+
 export function isHostP(p: Participant) {
   try {
     return JSON.parse(p.metadata || '{}').role === 'host';

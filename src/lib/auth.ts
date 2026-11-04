@@ -3,7 +3,7 @@ import { cookies, headers } from 'next/headers';
 import { one, q } from './db';
 
 export type Role = 'student' | 'tutor';
-export type User = { id: string; role: Role; name: string; email: string; grade: string | null };
+export type User = { id: string; role: Role; name: string; email: string; grade: string | null; avatar_at?: Date | null };
 
 const COOKIE = 'parta_session';
 // По https (ссылка туннеля, свой домен) — cookie с приставкой __Host-. Её не может подменить соседний адрес:
@@ -21,6 +21,9 @@ async function onHttps() {
   if ((h.get('x-forwarded-proto') || '').split(',')[0].trim() === 'https') return true;
   return process.env.NODE_ENV === 'production' && process.env.INSECURE_COOKIES !== '1';
 }
+
+/** Ставить ли cookie с пометкой Secure (сайт открыт по https). */
+export const httpsNow = () => onHttps();
 
 async function sessionToken() {
   const jar = await cookies();
@@ -54,13 +57,25 @@ export async function createSession(userId: string) {
   const jar = await cookies();
   jar.set(https ? SECURE_COOKIE : COOKIE, token, { httpOnly: true, sameSite: 'lax', secure: https, path: '/', expires });
   if (https && jar.get(COOKIE)) jar.delete(COOKIE);
+  // Метка браузера: по ней видно, что два аккаунта открывали в одном браузере (нельзя пригласить самого себя)
+  let device = jar.get(DEVICE)?.value || '';
+  if (!/^[A-Za-z0-9_-]{16,64}$/.test(device)) {
+    device = crypto.randomBytes(16).toString('base64url');
+    jar.set(DEVICE, device, { httpOnly: true, sameSite: 'lax', secure: https, path: '/', maxAge: 2 * 365 * 864e2 });
+  }
+  await q(
+    'insert into user_devices (user_id, device) values ($1, $2) on conflict (user_id, device) do update set last_at = now()',
+    [userId, device],
+  ).catch(() => {});
 }
+
+const DEVICE = 'parta_device';
 
 export async function getUser(): Promise<User | null> {
   const token = await sessionToken();
   if (!token) return null;
   return one<User>(
-    `select u.id, u.role, u.name, u.email, u.grade
+    `select u.id, u.role, u.name, u.email, u.grade, u.avatar_at
        from sessions s join users u on u.id = s.user_id
       where s.token = $1 and s.expires_at > now()`,
     [token],
@@ -92,4 +107,10 @@ export async function destroySession() {
   if (jar.get(COOKIE)) jar.delete(COOKIE);
   // __Host- cookie браузер удалит, только если и команда на удаление помечена как Secure
   if (jar.get(SECURE_COOKIE)) jar.set(SECURE_COOKIE, '', { httpOnly: true, sameSite: 'lax', secure: true, path: '/', maxAge: 0 });
+}
+
+/** Выйти на всех устройствах, кроме этого (после смены пароля). */
+export async function dropOtherSessions(userId: string) {
+  const token = await sessionToken();
+  await q('delete from sessions where user_id = $1 and token <> $2', [userId, token || '']);
 }

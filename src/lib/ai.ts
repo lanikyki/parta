@@ -485,7 +485,11 @@ export const STREAM_HEADERS = {
 };
 
 /** Поток для чата: браузер получает ответ сразу, текст — по мере прихода. */
-export function aiStream(messages: ChatMsg[], kind: AiKind, opts: { maxTokens?: number; details?: boolean; signal?: AbortSignal } = {}) {
+export function aiStream(
+  messages: ChatMsg[],
+  kind: AiKind,
+  opts: { maxTokens?: number; details?: boolean; signal?: AbortSignal; /** ответ пришёл целиком */ onDone?: () => void } = {},
+) {
   const enc = new TextEncoder();
   const ctrl = new AbortController();
   const onReq = () => ctrl.abort();
@@ -513,7 +517,7 @@ export function aiStream(messages: ChatMsg[], kind: AiKind, opts: { maxTokens?: 
       beat = setInterval(() => Date.now() - last >= BEAT_MS - 1000 && write(BEAT), BEAT_MS);
       race(messages, kind, opts.maxTokens ?? 4000, ctrl.signal, write)
         .then((r) => {
-          if (r.complete) return;
+          if (r.complete) return opts.onDone?.();
           console.warn(`[ИИ] ответ «${r.model}» оборвался${r.error ? `: ${aiErrorText(r.error)}` : ''}`);
           write(`${AI_ERR}Ответ оборвался — сервис ИИ перестал присылать текст. Нажмите «Повторить».`);
         })
