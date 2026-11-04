@@ -1,13 +1,15 @@
-import { Activity, Bot, ClipboardList, LifeBuoy, Mail, Search, Users, Video } from 'lucide-react';
+import { Activity, Bot, ClipboardList, CreditCard, Gift, LifeBuoy, Mail, Search, Users, Video, Wallet } from 'lucide-react';
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
+import { BillingForms, RefundButton } from '@/components/admin/BillingAdmin';
 import { LeadToggle } from '@/components/admin/LeadToggle';
 import { TestMail } from '@/components/admin/TestMail';
 import { AppHeader } from '@/components/app/AppHeader';
 import { LocalTime } from '@/components/app/LocalTime';
 import { aiConfigured } from '@/lib/ai';
 import { isAdmin } from '@/lib/admin';
+import { type PaymentRow, paymentTitle } from '@/lib/billing';
 import { getUser } from '@/lib/auth';
 import { gradeLabel } from '@/lib/brand';
 import { one, q } from '@/lib/db';
@@ -15,11 +17,15 @@ import { EVENT_LABELS, type EventKind } from '@/lib/events';
 import { livekitConfigured } from '@/lib/livekit';
 import { mailConfigured } from '@/lib/mail';
 import { supportEnabled } from '@/lib/messages';
+import { legal } from '@/lib/legal';
 import { firstParams } from '@/lib/nav';
+import { paymentProvider } from '@/lib/payments';
+import { callConfigured, callTestMode, fmtPhone } from '@/lib/phone';
+import { PLANS, REF_HOLD_DAYS, REF_SHARE, isPlan, rub, shortDate } from '@/lib/plans';
 
 export const metadata: Metadata = { title: 'Админка', robots: { index: false } };
 
-type Tab = 'overview' | 'users' | 'leads' | 'events';
+type Tab = 'overview' | 'users' | 'billing' | 'leads' | 'events';
 type UserRow = {
   id: string;
   name: string;
@@ -30,7 +36,23 @@ type UserRow = {
   last_at: Date | null;
   lessons: number;
   ai: number;
+  plan: string | null;
+  plan_until: Date | null;
+  phone: string | null;
 };
+type PayRow = PaymentRow & { name: string | null; email: string | null; user_plan: string | null; user_until: Date | null; latest: boolean };
+
+const PROVIDER: Record<string, string> = { yookassa: 'ЮKassa', test: 'тест', admin: 'админка' };
+const PAY_STATUS: Record<string, [string, string]> = {
+  succeeded: ['оплачен', 'bg-tint text-brand-800'],
+  pending: ['ждёт оплаты', 'bg-[#fff4cc] text-ink'],
+  canceled: ['не прошёл', 'bg-mist text-ink-3'],
+  refunded: ['возвращён', 'bg-danger-soft text-danger-600'],
+};
+
+/** Тариф человека: «Про» до 12 дек. — или прочерк. */
+const planText = (plan: string | null, until: Date | null) =>
+  isPlan(plan) && until && new Date(until).getTime() > Date.now() ? `«${PLANS[plan].name}» до ${shortDate(until)}` : '—';
 type EventRow = { id: string; at: Date; kind: string; user_id: string | null; actor: string | null; detail: string | null; ip: string | null; email: string | null };
 type LeadRow = { id: string; name: string; contact: string; grade: string | null; subject: string | null; comment: string | null; created_at: Date; done_at: Date | null };
 
@@ -87,7 +109,7 @@ function Events({ rows, showFilterLinks = true, compact = false }: { rows: Event
                   <span className="font-medium">{e.actor || 'Гость'}</span>
                 )}
                 {e.email && (
-                  <span className="block truncate text-[12px] text-ink-3" title={e.email}>
+                  <span className={`block truncate text-[12px] text-ink-3 ${compact ? 'max-w-[160px]' : 'max-w-[220px]'}`} title={e.email}>
                     {e.email}
                   </span>
                 )}
@@ -129,7 +151,7 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
   if (!user) redirect('/login?next=/admin');
   if (!isAdmin(user)) notFound();
   const sp = await firstParams(searchParams);
-  const tab: Tab = (['users', 'leads', 'events'] as const).find((t) => t === sp.tab) ?? 'overview';
+  const tab: Tab = (['users', 'billing', 'leads', 'events'] as const).find((t) => t === sp.tab) ?? 'overview';
   const search = (sp.q || '').replaceAll('\u0000', '').trim().slice(0, 80);
   const kind = sp.kind && sp.kind in EVENT_LABELS ? sp.kind : '';
   const userId = /^[0-9a-f-]{36}$/.test(sp.user || '') ? sp.user! : '';
@@ -156,6 +178,7 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
   const tabs: [Tab, string, string?, string?][] = [
     ['overview', 'Обзор'],
     ['users', 'Пользователи', String(s.users ?? 0)],
+    ['billing', 'Платежи'],
     ['leads', 'Обращения', s.leads_new ? String(s.leads_new) : undefined, 'новых'],
     ['events', 'Журнал'],
   ];
@@ -167,11 +190,16 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
       q<LeadRow>('select * from leads where done_at is null order by created_at desc limit 5'),
       q<UserRow>("select id, name, email, role, grade, created_at from users order by created_at desc limit 6"),
     ]);
-    const status: [string, boolean, string][] = [
-      ['Почта (коды и уведомления)', mailConfigured(), 'SMTP_USER и SMTP_PASS'],
-      ['Поддержка в «Сообщениях»', supportEnabled(), 'ADMIN_EMAILS'],
-      ['ИИ-помощник', aiConfigured(), 'AI_BASE_URL и AI_API_KEY'],
-      ['Видео', livekitConfigured(), 'LIVEKIT_URL и ключи'],
+    const on = (ok: boolean, hint: string): ['ok' | 'off', string] => (ok ? ['ok', 'работает'] : ['off', `нет: ${hint}`]);
+    const pay = paymentProvider();
+    const status: [string, 'ok' | 'test' | 'off', string][] = [
+      ['Почта (коды и уведомления)', ...on(mailConfigured(), 'SMTP_USER и SMTP_PASS')],
+      ['Поддержка в «Сообщениях»', ...on(supportEnabled(), 'ADMIN_EMAILS')],
+      ['ИИ-помощник', ...on(aiConfigured(), 'AI_BASE_URL и AI_API_KEY')],
+      ['Видео', ...on(livekitConfigured(), 'LIVEKIT_URL и ключи')],
+      ['Оплата', ...(pay === 'yookassa' ? (['ok', 'ЮKassa'] as const) : pay === 'test' ? (['test', 'тестовый режим'] as const) : (['off', 'нет: ключи ЮKassa'] as const))],
+      ['Звонки для подтверждения телефона', ...(callConfigured() ? (['ok', 'SMS.ru'] as const) : callTestMode() ? (['test', 'тестовый режим'] as const) : (['off', 'нет: SMSRU_API_ID'] as const))],
+      ['Реквизиты в документах', ...on(legal().filled, 'LEGAL_NAME, LEGAL_INN')],
     ];
     content = (
       <div className="grid gap-6">
@@ -232,11 +260,15 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
             <section className="card p-5">
               <h2 className="text-lg font-medium">Что подключено</h2>
               <ul className="mt-3 grid gap-2 text-[14px]">
-                {status.map(([name, ok, hint]) => (
+                {status.map(([name, state, text]) => (
                   <li key={name} className="flex items-center justify-between gap-3">
                     <span>{name}</span>
-                    <span className={`rounded-full px-2.5 py-0.5 text-[13px] ${ok ? 'bg-tint text-brand-800' : 'bg-danger-soft text-danger-600'}`}>
-                      {ok ? 'работает' : `нет: ${hint}`}
+                    <span
+                      className={`shrink-0 rounded-full px-2.5 py-0.5 text-right text-[13px] ${
+                        state === 'ok' ? 'bg-tint text-brand-800' : state === 'test' ? 'bg-[#fff4cc] text-ink' : 'bg-danger-soft text-danger-600'
+                      }`}
+                    >
+                      {text}
                     </span>
                   </li>
                 ))}
@@ -250,7 +282,7 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
   } else if (tab === 'users') {
     const like = `%${search.replace(/[%_\\]/g, '\\$&')}%`;
     const users = await q<UserRow>(
-      `select u.id, u.name, u.email, u.role, u.grade, u.created_at,
+      `select u.id, u.name, u.email, u.role, u.grade, u.created_at, u.plan, u.plan_until, u.phone,
               (select max(at) from events e where e.user_id = u.id) as last_at,
               ((select count(*) from lessons l where l.owner_id = u.id) + (select count(*) from lesson_members m where m.user_id = u.id))::int as lessons,
               (select count(*) from events e where e.user_id = u.id and e.kind like 'ai_%')::int as ai
@@ -278,11 +310,13 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
         </form>
         {users.length ? (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[820px] text-left text-[14px]">
+            <table className="w-full min-w-[1000px] text-left text-[14px]">
               <thead className="text-[13px] text-ink-3">
                 <tr className="border-b border-line">
                   <th className="px-4 py-2.5 font-normal">Кто</th>
                   <th className="px-4 py-2.5 font-normal">Роль</th>
+                  <th className="px-4 py-2.5 font-normal">Тариф</th>
+                  <th className="px-4 py-2.5 font-normal">Телефон</th>
                   <th className="px-4 py-2.5 font-normal">Зарегистрирован</th>
                   <th className="px-4 py-2.5 font-normal">Был на сайте</th>
                   <th className="px-4 py-2.5 font-normal">Уроков</th>
@@ -298,6 +332,8 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
                       <span className="text-[13px] text-ink-3 [overflow-wrap:anywhere]">{u.email}</span>
                     </td>
                     <td className="px-4 py-2.5 whitespace-nowrap">{u.role === 'tutor' ? 'Репетитор' : u.grade ? `Ученик, ${gradeLabel(u.grade).toLowerCase()}` : 'Ученик'}</td>
+                    <td className="px-4 py-2.5 whitespace-nowrap">{u.role === 'tutor' ? planText(u.plan, u.plan_until) : ''}</td>
+                    <td className="px-4 py-2.5 whitespace-nowrap text-ink-2">{u.phone && /^7\d{10}$/.test(u.phone) ? fmtPhone(u.phone) : '—'}</td>
                     <td className="px-4 py-2.5 whitespace-nowrap text-ink-2">
                       <LocalTime iso={iso(u.created_at)} compact />
                     </td>
@@ -318,6 +354,139 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
           <p className="p-5 text-[15px] text-ink-2">{search ? 'Никого не нашлось.' : 'Пока никто не зарегистрировался.'}</p>
         )}
       </section>
+    );
+  } else if (tab === 'billing') {
+    // Месяц считаем по московскому времени
+    const month = "date_trunc('month', now() at time zone 'Europe/Moscow') at time zone 'Europe/Moscow'";
+    const [money, subs, bonus, pays] = await Promise.all([
+      one<{ month: number; total: number; refunded: number; paid_month: number; test: number }>(
+        `select coalesce(sum(amount_kop - refunded_kop) filter (where paid_at >= ${month}), 0)::int as month,
+                coalesce(sum(amount_kop - refunded_kop), 0)::int as total,
+                coalesce(sum(refunded_kop), 0)::int as refunded,
+                (count(*) filter (where paid_at >= ${month}))::int as paid_month,
+                (count(*) filter (where provider = 'test'))::int as test
+           from payments where status in ('succeeded', 'refunded') and provider in ('yookassa', 'test')`,
+      ),
+      one<{ start: number; pro: number; auto: number }>(
+        `select (count(*) filter (where plan = 'start'))::int as start, (count(*) filter (where plan = 'pro'))::int as pro,
+                (count(*) filter (where autorenew and pay_method is not null))::int as auto
+           from users where plan in ('start', 'pro') and plan_until > now()`,
+      ),
+      one<{ available: number; pending: number }>(
+        `select coalesce(sum(amount_kop) filter (where available_at <= now()), 0)::int as available,
+                coalesce(sum(amount_kop) filter (where available_at > now() and amount_kop > 0), 0)::int as pending
+           from bonus_ledger where canceled_at is null`,
+      ),
+      q<PayRow>(
+        `select p.*, u.name, u.email, u.plan as user_plan, u.plan_until as user_until,
+                p.id = (select p2.id from payments p2 where p2.user_id = p.user_id and p2.applied_at is not null order by p2.applied_at desc limit 1) as latest
+           from payments p left join users u on u.id = p.user_id
+          where p.status <> 'pending' or p.created_at > now() - interval '1 day'
+          order by p.created_at desc limit 200`,
+      ),
+    ]);
+    const m = money ?? { month: 0, total: 0, refunded: 0, paid_month: 0, test: 0 };
+    // Сколько вернуть «за неиспользованные дни»: только для последней оплаты действующего тарифа, иначе — всё, что ещё не вернули
+    const suggest = (p: PayRow) => {
+      const left = p.amount_kop - p.refunded_kop;
+      if (!p.latest || p.user_plan !== p.plan || !p.user_until) return left;
+      const unused = Math.min(1, Math.max(0, (new Date(p.user_until).getTime() - Date.now()) / (p.days * 864e5)));
+      return Math.round(left * unused);
+    };
+    content = (
+      <div className="grid gap-6">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <Stat icon={<Wallet size={17} />} title="Выручка за месяц" value={rub(m.month)} note={`оплат в этом месяце: ${m.paid_month}`} />
+          <Stat
+            icon={<CreditCard size={17} />}
+            title="За всё время"
+            value={rub(m.total)}
+            note={`${m.refunded ? `возвращено ${rub(m.refunded)}` : 'возвратов не было'}${m.test ? ' · есть тестовые оплаты' : ''}`}
+          />
+          <Stat
+            icon={<Users size={17} />}
+            title="Действующие подписки"
+            value={(subs?.start ?? 0) + (subs?.pro ?? 0)}
+            note={`«Старт» ${subs?.start ?? 0} · «Про» ${subs?.pro ?? 0} · с автопродлением ${subs?.auto ?? 0}`}
+          />
+          <Stat
+            icon={<Gift size={17} />}
+            title="Бонусы на балансах"
+            value={rub(bonus?.available ?? 0)}
+            note={
+              bonus?.pending
+                ? `ещё ${rub(bonus.pending)} станут доступны через ${REF_HOLD_DAYS} дней после оплаты`
+                : `за приглашения коллег: ${Math.round(REF_SHARE * 100)}% с их оплат, доступны через ${REF_HOLD_DAYS} дней`
+            }
+          />
+        </div>
+        <BillingForms />
+        <section className="card min-w-0 overflow-hidden">
+          <h2 className="border-b border-line px-5 py-4 text-lg font-medium">Оплаты</h2>
+          {pays.length ? (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[980px] text-left text-[14px]">
+                <thead className="text-[13px] text-ink-3">
+                  <tr className="border-b border-line">
+                    <th className="px-4 py-2.5 font-normal">Когда</th>
+                    <th className="px-4 py-2.5 font-normal">Кто</th>
+                    <th className="px-4 py-2.5 font-normal">Что</th>
+                    <th className="px-4 py-2.5 font-normal">Сумма</th>
+                    <th className="px-4 py-2.5 font-normal">Скидка и бонусы</th>
+                    <th className="px-4 py-2.5 font-normal">Статус</th>
+                    <th className="px-4 py-2.5 font-normal" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {pays.map((p) => {
+                    const [st, cls] = PAY_STATUS[p.status] ?? [p.status, 'bg-mist text-ink-3'];
+                    const left = p.amount_kop - p.refunded_kop;
+                    return (
+                      <tr key={p.id} className="border-b border-line last:border-0">
+                        <td className="px-4 py-2.5 whitespace-nowrap text-ink-2">
+                          <LocalTime iso={iso(p.paid_at ?? p.created_at)} compact />
+                        </td>
+                        <td className="px-4 py-2.5">
+                          <b className="block font-medium">{p.name ?? 'Удалённый пользователь'}</b>
+                          {p.email && <span className="text-[13px] text-ink-3 [overflow-wrap:anywhere]">{p.email}</span>}
+                        </td>
+                        <td className="px-4 py-2.5">
+                          {paymentTitle(p)}
+                          <span className="block text-[13px] text-ink-3">
+                            {PROVIDER[p.provider] ?? p.provider}
+                            {p.recurring ? ' · автопродление' : ''}
+                            {p.card ? ` · ${p.card}` : ''}
+                            {p.note ? ` · ${p.note}` : ''}
+                          </span>
+                        </td>
+                        <td className="px-4 py-2.5 whitespace-nowrap">
+                          {rub(p.amount_kop)}
+                          {p.refunded_kop > 0 && <span className="block text-[13px] text-danger-600">возврат {rub(p.refunded_kop)}</span>}
+                        </td>
+                        <td className="px-4 py-2.5 whitespace-nowrap text-ink-2">
+                          {p.discount_kop > 0 && <span className="block">скидка {rub(p.discount_kop)}</span>}
+                          {p.bonus_kop > 0 && <span className="block">бонусы {rub(p.bonus_kop)}</span>}
+                          {!p.discount_kop && !p.bonus_kop && '—'}
+                        </td>
+                        <td className="px-4 py-2.5">
+                          <span className={`rounded-full px-2.5 py-0.5 text-[13px] whitespace-nowrap ${cls}`}>{st}</span>
+                        </td>
+                        <td className="px-4 py-2.5 text-right whitespace-nowrap">
+                          {p.status === 'succeeded' && left > 0 && (p.provider === 'yookassa' || p.provider === 'test') && (
+                            <RefundButton id={p.id} left={left} suggest={suggest(p)} />
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <p className="p-5 text-[15px] text-ink-2">Оплат пока не было.</p>
+          )}
+        </section>
+      </div>
     );
   } else if (tab === 'leads') {
     const leads = await q<LeadRow>('select * from leads order by (done_at is not null), created_at desc limit 300');
@@ -386,13 +555,13 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
         <h1 className="flex items-center gap-3 text-[30px] leading-tight font-medium sm:text-[36px]">
           <Activity className="text-brand" size={30} /> Админка
         </h1>
-        <p className="mt-1 text-ink-2">Видно только администраторам из ADMIN_EMAILS. Здесь обращения, пользователи и журнал действий.</p>
+        <p className="mt-1 text-ink-2">Видно только администраторам из ADMIN_EMAILS. Здесь обращения, пользователи, оплаты и журнал действий.</p>
         <nav className="mt-6 mb-6 grid grid-cols-2 gap-1 rounded-[14px] bg-white p-1 shadow-[inset_0_0_0_1px_var(--color-line)] sm:flex sm:w-fit sm:overflow-x-auto">
           {tabs.map(([key, name, badge, badgeNote]) => (
             <Link
               key={key}
               href={key === 'overview' ? '/admin' : `/admin?tab=${key}`}
-              className={`flex h-10 shrink-0 items-center justify-center gap-2 rounded-[10px] px-3 text-[15px] whitespace-nowrap transition-colors sm:justify-start sm:px-4 ${
+              className={`flex h-10 shrink-0 items-center justify-center gap-2 rounded-[10px] px-3 text-[15px] whitespace-nowrap transition-colors max-sm:[&:last-child:nth-child(odd)]:col-span-2 sm:justify-start sm:px-4 ${
                 tab === key ? 'bg-brand font-medium text-white' : 'text-ink-2 hover:text-ink'
               }`}
             >
