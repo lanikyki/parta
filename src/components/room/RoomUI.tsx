@@ -34,6 +34,7 @@ import {
   SendHorizontal,
   Settings,
   Sparkles,
+  Timer,
   Users,
   Video,
   VideoOff,
@@ -47,12 +48,21 @@ import { Board } from '@/components/board/Board';
 import type { Me } from '@/components/board/sync';
 import { renderMarkdown, renderMathText } from '@/lib/mathtext';
 import { shareOrigin, usePublicOrigin } from '@/lib/publicOrigin';
-import { mediaErrorText } from './devices';
-import { MOD_TOPIC, MenuItem, byRank, colorFor, initials, isHostP } from './parts';
+import { CAM_KEY, MIC_KEY, mediaErrorText, saveDevice } from './devices';
+import { MOD_TOPIC, MenuItem, avatarOf, byRank, colorFor, initials, isHostP } from './parts';
 import { People } from './People';
 import type { LessonInfo } from './LessonClient';
 
-type Props = { lesson: LessonInfo; me: Me; ai: boolean; notice?: string; onLeave: () => void };
+type Props = {
+  lesson: LessonInfo;
+  me: Me;
+  ai: boolean;
+  notice?: string;
+  onLeave: () => void;
+  /** Пробный урок: когда выключится видео (репетитор видит обратный отсчёт) */
+  trialEndsAt?: number | null;
+  onTrialEnd?: () => void;
+};
 type Msg = { id: string; author: string; text: string; t: number; mine: boolean; old?: boolean };
 type Toggle = { toggle: (force?: boolean) => unknown; enabled: boolean; pending: boolean };
 type Media = { mic: Toggle; cam: Toggle; screen: Toggle; canShare: boolean };
@@ -112,6 +122,29 @@ function useElapsed() {
     return () => clearInterval(id);
   }, []);
   return s;
+}
+
+/** Сколько секунд осталось до конца пробного урока (null — урок не пробный). В ноль — onEnd один раз. */
+function useTrialLeft(endsAt: number | null | undefined, onEnd?: () => void) {
+  const [left, setLeft] = useState<number | null>(null);
+  const end = useRef(onEnd);
+  end.current = onEnd;
+  useEffect(() => {
+    if (!endsAt) return setLeft(null);
+    let fired = false;
+    const tick = () => {
+      const s = Math.max(0, Math.round((endsAt - Date.now()) / 1000));
+      setLeft(s);
+      if (s === 0 && !fired) {
+        fired = true;
+        end.current?.();
+      }
+    };
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [endsAt]);
+  return left;
 }
 
 function useToast() {
@@ -238,6 +271,7 @@ function Tile({ trackRef, onFocus }: { trackRef: TrackReferenceOrPlaceholder; on
   const camMuted = useIsMuted(trackRef);
   const name = p.name || p.identity;
   const video = isTrackReference(trackRef) && !camMuted;
+  const avatar = avatarOf(p);
 
   return (
     <div className="@container group/tile relative aspect-video w-[calc(50%-4px)] shrink-0 overflow-hidden rounded-2xl bg-brand-950 sm:w-56 phone-land:w-full lg:w-auto">
@@ -245,12 +279,17 @@ function Tile({ trackRef, onFocus }: { trackRef: TrackReferenceOrPlaceholder; on
         <VideoTrack trackRef={trackRef} className={`h-full w-full object-cover ${p.isLocal ? '-scale-x-100' : ''}`} />
       ) : (
         <div className="grid h-full place-items-center bg-[radial-gradient(circle_at_50%_40%,#0a6342,#062e20_70%)]">
-          <span
-            className="grid size-[24cqw] place-items-center rounded-full text-[9cqw] font-medium text-white"
-            style={{ background: colorFor(p.identity) }}
-          >
-            {initials(name)}
-          </span>
+          {avatar ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={avatar} alt="" className="size-[24cqw] rounded-full object-cover" />
+          ) : (
+            <span
+              className="grid size-[24cqw] place-items-center rounded-full text-[9cqw] font-medium text-white"
+              style={{ background: colorFor(p.identity) }}
+            >
+              {initials(name)}
+            </span>
+          )}
         </div>
       )}
       <span
@@ -376,7 +415,13 @@ function DeviceSelect({ kind, label, room }: { kind: MediaDeviceKind; label: str
           value={list.some((d) => d.deviceId === activeDeviceId) ? activeDeviceId : list[0].deviceId}
           onChange={(e) => {
             setError('');
-            setActiveMediaDevice(e.target.value).catch((err) => setError(mediaErrorText(err, kind === 'videoinput' ? 'cam' : 'mic')));
+            const id = e.target.value;
+            setActiveMediaDevice(id)
+              .then(() => {
+                // В следующем уроке включим эту же камеру или микрофон
+                if (kind !== 'audiooutput') saveDevice(kind === 'videoinput' ? CAM_KEY : MIC_KEY, id);
+              })
+              .catch((err) => setError(mediaErrorText(err, kind === 'videoinput' ? 'cam' : 'mic')));
           }}
         >
           {list.map((d, i) => (
@@ -387,7 +432,7 @@ function DeviceSelect({ kind, label, room }: { kind: MediaDeviceKind; label: str
         </select>
       ) : (
         <span className="text-[14px] font-normal text-ink-3">
-          {kind === 'audiooutput' ? 'Этот браузер не даёт выбрать динамики — звук идёт туда же, куда и у других программ.' : 'Не найдено'}
+          {kind === 'audiooutput' ? 'Этот браузер не даёт выбрать динамики — звук идёт туда же, куда и у других программ.' : 'Не найдено'}
         </span>
       )}
       {error && <span className="text-[14px] font-normal text-danger-600">{error}</span>}
@@ -409,7 +454,7 @@ function DevicesModal({ room, onClose }: { room: Room; onClose: () => void }) {
       <div role="dialog" aria-modal="true" aria-labelledby="devices-title" className="pop-in w-full max-w-[480px] rounded-[24px] bg-white p-6 shadow-lift">
         <div className="flex items-start gap-3">
           <h2 id="devices-title" className="flex-1 text-[20px] leading-tight font-medium">
-            Звук и видео
+            Звук и видео
           </h2>
           <button type="button" onClick={onClose} aria-label="Закрыть" className="-mt-1 -mr-2 grid h-9 w-9 place-items-center rounded-full text-ink-2 hover:bg-mist">
             <X size={18} />
@@ -421,8 +466,8 @@ function DevicesModal({ room, onClose }: { room: Room; onClose: () => void }) {
           <DeviceSelect kind="videoinput" label="Камера" room={room} />
         </div>
         <p className="mt-4 rounded-xl bg-mist px-4 py-3 text-[14px] text-ink-2">
-          Вас плохо слышно или слышно эхо — подключите наушники с микрофоном и выберите их здесь. Видео тормозит — закройте лишние вкладки и программы
-          (торренты, обновления), а если вы в VPN — выключите его.
+          Вас плохо слышно или слышно эхо — подключите наушники с микрофоном и выберите их здесь. Видео тормозит — закройте лишние вкладки и программы
+          (торренты, обновления), а если вы в VPN — выключите его.
         </p>
       </div>
     </div>
@@ -439,7 +484,7 @@ function ScreenView({ share, onStop }: { share: TrackReference; onStop: () => vo
             <MonitorUp size={28} />
           </span>
           <p className="mt-4 text-[20px] font-medium">Вы показываете экран</p>
-          <p className="mx-auto mt-1 max-w-[340px] text-[15px] text-white/60">Участники видят ваш экран. Доска никуда не денется.</p>
+          <p className="mx-auto mt-1 max-w-[340px] text-[15px] text-white/60">Участники видят ваш экран. Доска никуда не денется.</p>
           <button type="button" className="btn btn-accent mt-6" onClick={onStop}>
             <ScreenShareOff size={18} /> Остановить показ
           </button>
@@ -485,7 +530,7 @@ function ChatPanel({ msgs, onSend, active }: { msgs: Msg[]; onSend: (t: string) 
               </span>
               <p className="mt-3 text-[15px] font-medium">Чат урока</p>
               <p className="mt-1 text-[14px] leading-snug text-ink-3">
-                Вопросы, ссылки и формулы. Формулу пишите между знаками $: например,{' '}
+                Вопросы, ссылки и формулы. Формулу пишите между знаками $: например,{' '}
                 <code className="rounded bg-mist px-1 font-mono text-[12px] text-ink-2">$x^2+1$</code> превратится в{' '}
                 <span className="text-ink" dangerouslySetInnerHTML={{ __html: renderMathText('$x^2+1$') }} />.
               </p>
@@ -560,6 +605,7 @@ function SummaryModal({ code, ai, onClose, onSend }: { code: string; ai: boolean
   const [state, setState] = useState<'idle' | 'busy' | 'done'>('idle');
   const [summary, setSummary] = useState('');
   const [error, setError] = useState('');
+  const [upgrade, setUpgrade] = useState(false);
   const [sent, setSent] = useState(false);
   const sec = useWaitSec(state === 'busy');
   const html = useMemo(() => (summary ? renderMarkdown(summary) : ''), [summary]);
@@ -581,7 +627,8 @@ function SummaryModal({ code, ai, onClose, onSend }: { code: string; ai: boolean
       });
       // Сервер, пока ИИ думает, шлёт пробелы — поэтому ошибка приходит в поле error даже при коде 200
       const out = await res.json().catch(() => ({}));
-      if (!res.ok || out.error || !out.summary) throw new Error(out.error || 'Не получилось составить конспект, попробуйте ещё раз');
+      setUpgrade(res.status === 402 && Boolean(out.upgrade));
+      if (!res.ok || out.error || !out.summary) throw new Error(out.error || 'Не получилось составить конспект, попробуйте ещё раз');
       setSummary(String(out.summary));
       setSent(false);
       setState('done');
@@ -610,7 +657,7 @@ function SummaryModal({ code, ai, onClose, onSend }: { code: string; ai: boolean
             <h2 id="summary-title" className="text-[20px] leading-tight font-medium">
               Итоги урока
             </h2>
-            <p className="mt-0.5 text-[14px] text-ink-3">ИИ соберёт конспект и домашнее задание по доске и чату</p>
+            <p className="mt-0.5 text-[14px] text-ink-3">ИИ соберёт конспект и домашнее задание по доске и чату</p>
           </div>
           <button
             type="button"
@@ -624,8 +671,8 @@ function SummaryModal({ code, ai, onClose, onSend }: { code: string; ai: boolean
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5 sm:px-6">
           {!ai ? (
             <div className="rounded-2xl bg-mist p-4 text-[15px] text-ink-2">
-              ИИ-помощник ещё не подключён. Добавьте на сервере переменные <code className="font-mono text-[13px]">AI_BASE_URL</code> и{' '}
-              <code className="font-mono text-[13px]">AI_API_KEY</code> — инструкция в README.
+              ИИ-помощник ещё не подключён. Добавьте на сервере переменные <code className="font-mono text-[13px]">AI_BASE_URL</code> и{' '}
+              <code className="font-mono text-[13px]">AI_API_KEY</code> — инструкция в README.
             </div>
           ) : state === 'done' ? (
             <div className="prose-chat text-[15px]" dangerouslySetInnerHTML={{ __html: html }} />
@@ -647,16 +694,28 @@ function SummaryModal({ code, ai, onClose, onSend }: { code: string; ai: boolean
           )}
           {state === 'busy' && (
             <p className="mt-3 text-[13px] text-ink-3">
-              ИИ читает доску и чат урока — обычно это занимает 1–2 минуты.{sec >= 3 ? ` Прошло ${formatSec(sec)}.` : ''}
+              ИИ читает доску и чат урока — обычно это занимает 1–2 минуты.{sec >= 3 ? ` Прошло ${formatSec(sec)}.` : ''}
             </p>
           )}
-          {error && <p className="mt-4 rounded-xl bg-danger-soft px-4 py-3 text-[14px] text-danger-600">{error}</p>}
+          {error && (
+            <p className="mt-4 rounded-xl bg-danger-soft px-4 py-3 text-[14px] text-danger-600">
+              {error}
+              {upgrade && (
+                <>
+                  {' '}
+                  <a href="/billing" target="_blank" rel="noopener" className="font-medium underline">
+                    Выбрать тариф
+                  </a>
+                </>
+              )}
+            </p>
+          )}
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2 border-t border-line px-5 py-4 sm:px-6">
           {state === 'done' ? (
             <>
               <span className="mr-auto flex items-center gap-1.5 text-[13px] text-mint">
-                <Check size={15} /> Сохранено в кабинете
+                <Check size={15} /> Сохранено в кабинете
               </span>
               <button type="button" className="btn btn-line btn-sm" onClick={() => setState('idle')}>
                 Заново
@@ -670,7 +729,7 @@ function SummaryModal({ code, ai, onClose, onSend }: { code: string; ai: boolean
                   setSent(true);
                 }}
               >
-                {sent ? 'Отправлено в чат' : 'Отправить в чат'}
+                {sent ? 'Отправлено в чат' : 'Отправить в чат'}
               </button>
             </>
           ) : (
@@ -759,6 +818,10 @@ function RoomShell(props: ShellProps) {
   const { lesson, me, ai, notice, onLeave, room, media, tiles, focusView, people, peopleCount, share, reconnecting, toast, showToast } = props;
   const desktop = useIsDesktop();
   const elapsed = useElapsed();
+  const trialLeft = useTrialLeft(me.isHost ? props.trialEndsAt : null, props.onTrialEnd);
+  // Предупреждаем за 10, 5 и 1 минуту; «Скрыть» прячет до следующего предупреждения
+  const trialStep = trialLeft === null ? 0 : trialLeft <= 60 ? 3 : trialLeft <= 300 ? 2 : trialLeft <= 600 ? 1 : 0;
+  const [trialSeen, setTrialSeen] = useState(0);
   const chat = useLessonChat(lesson.code, room, me);
   usePublicOrigin();
   const [tab, setTab] = useState<'chat' | 'people'>('chat');
@@ -808,9 +871,9 @@ function RoomShell(props: ShellProps) {
     const url = `${shareOrigin()}/lesson/${lesson.code}`;
     try {
       await navigator.clipboard.writeText(url);
-      showToast('Ссылка на урок скопирована');
+      showToast('Ссылка на урок скопирована');
     } catch {
-      window.prompt('Скопируйте ссылку на урок', url);
+      window.prompt('Скопируйте ссылку на урок', url);
     }
   }, [lesson.code, showToast]);
 
@@ -859,10 +922,21 @@ function RoomShell(props: ShellProps) {
             ))}
           </div>
         )}
-        <span className="flex shrink-0 items-center gap-2 rounded-full bg-white px-3 py-1.5 font-mono text-[12px] text-ink-2 shadow-soft">
-          <span className="h-2 w-2 animate-pulse rounded-full bg-accent" aria-hidden />
-          <span className="tabular-nums">{fmtDur(elapsed)}</span>
-        </span>
+        {trialLeft !== null ? (
+          <span
+            title="До конца пробного урока"
+            className={`flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-[12px] shadow-soft ${trialLeft <= 600 ? 'bg-sun text-ink' : 'bg-white text-ink-2'}`}
+          >
+            <Timer size={14} aria-hidden />
+            <span className="hidden sm:inline">Пробный урок</span>
+            <span className="font-mono tabular-nums">{fmtDur(trialLeft)}</span>
+          </span>
+        ) : (
+          <span className="flex shrink-0 items-center gap-2 rounded-full bg-white px-3 py-1.5 font-mono text-[12px] text-ink-2 shadow-soft">
+            <span className="h-2 w-2 animate-pulse rounded-full bg-accent" aria-hidden />
+            <span className="tabular-nums">{fmtDur(elapsed)}</span>
+          </span>
+        )}
         <button type="button" onClick={invite} className="btn btn-soft btn-sm hidden shrink-0 sm:inline-flex">
           <Link2 size={16} /> Пригласить
         </button>
@@ -877,7 +951,7 @@ function RoomShell(props: ShellProps) {
             <span className="mb-2 grid h-9 w-9 place-items-center rounded-xl bg-tint text-brand">
               <VideoOff size={18} />
             </span>
-            Видеосвязь не подключена. Доска и чат работают и сохраняются.
+            Видеосвязь не подключена. Доска и чат работают и сохраняются.
           </div>
         </section>
       )}
@@ -888,11 +962,27 @@ function RoomShell(props: ShellProps) {
           <Board code={lesson.code} room={room} me={me} />
           {view === 'screen' && share && <ScreenView share={share} onStop={() => media?.screen.toggle(false)} />}
           {focus && focusView?.(focus, closeFocus)}
+          {trialLeft !== null && trialStep > trialSeen && !reconnecting && (
+            <div className={`pointer-events-none absolute inset-x-0 z-40 flex justify-center px-3 ${notice && noticeOpen ? 'top-16' : 'top-3'}`}>
+              <span className="pop-in pointer-events-auto flex max-w-[560px] items-center gap-2 rounded-2xl bg-ink py-2 pr-2 pl-4 text-[14px] text-white shadow-lift">
+                <Timer size={16} className="shrink-0 text-sun" />
+                <span>
+                  {trialLeft > 60 ? `Пробный урок закончится через ${Math.ceil(trialLeft / 60)} мин.` : 'Пробный урок заканчивается.'} Видео выключится, доска и чат останутся.{' '}
+                  <a href={`/billing?back=${encodeURIComponent(`/lesson/${lesson.code}`)}`} target="_blank" rel="noopener" className="font-medium text-sun underline">
+                    Выбрать тариф
+                  </a>
+                </span>
+                <button type="button" onClick={() => setTrialSeen(trialStep)} aria-label="Скрыть" className="grid h-7 w-7 shrink-0 place-items-center rounded-full hover:bg-white/10">
+                  <X size={15} />
+                </button>
+              </span>
+            </div>
+          )}
           {(reconnecting || (notice && noticeOpen)) && (
             <div className="pointer-events-none absolute inset-x-0 top-3 z-40 flex justify-center px-3">
               {reconnecting ? (
                 <span className="pop-in flex items-center gap-2 rounded-full bg-ink px-4 py-2 text-[14px] text-white shadow-lift">
-                  <WifiOff size={16} /> Связь прервалась — переподключаемся…
+                  <WifiOff size={16} /> Связь прервалась — переподключаемся…
                 </span>
               ) : (
                 <span className="pop-in pointer-events-auto flex items-center gap-2 rounded-2xl bg-[#fff4cc] py-2 pr-2 pl-4 text-[14px] text-ink shadow-lift">
@@ -957,7 +1047,7 @@ function RoomShell(props: ShellProps) {
                   {media.screen.enabled ? <ScreenShareOff size={19} /> : <ScreenShare size={19} />}
                 </CtrlButton>
               )}
-              <CtrlButton label="Звук и видео: выбрать микрофон, камеру и динамики" onClick={() => setDevicesOpen(true)} className="max-lg:hidden">
+              <CtrlButton label="Звук и видео: выбрать микрофон, камеру и динамики" onClick={() => setDevicesOpen(true)} className="max-lg:hidden">
                 <Settings size={19} />
               </CtrlButton>
             </>
@@ -994,7 +1084,7 @@ function RoomShell(props: ShellProps) {
             <button type="button" aria-label="Закрыть меню" className="fixed inset-0 z-40 cursor-default lg:hidden" onClick={() => setMore(false)} />
             <div className="pop-in absolute right-3 bottom-[72px] z-50 grid w-60 gap-0.5 rounded-2xl bg-white p-1.5 shadow-lift lg:hidden">
               <MenuItem icon={<Link2 size={18} />} onClick={() => (setMore(false), invite())}>
-                Пригласить по ссылке
+                Пригласить по ссылке
               </MenuItem>
               {people && (
                 <MenuItem icon={<Users size={18} />} onClick={() => openPanel('people')}>
@@ -1013,7 +1103,7 @@ function RoomShell(props: ShellProps) {
               )}
               {media && (
                 <MenuItem icon={<Settings size={18} />} onClick={() => (setDevicesOpen(true), setMore(false))}>
-                  Звук и видео
+                  Звук и видео
                 </MenuItem>
               )}
               {me.isHost && (
@@ -1063,7 +1153,7 @@ function RoomShell(props: ShellProps) {
           onClose={() => setSummaryOpen(false)}
           onSend={(t) => {
             chat.send(t);
-            showToast('Конспект отправлен в чат');
+            showToast('Конспект отправлен в чат');
           }}
         />
       )}
@@ -1084,7 +1174,7 @@ function LiveRoom(props: Props & { room: Room }) {
   const screen = useTrackToggle({
     source: Track.Source.ScreenShare,
     onDeviceError: (e) => {
-      if (e?.name !== 'NotAllowedError') showToast('Не удалось показать экран');
+      if (e?.name !== 'NotAllowedError') showToast('Не удалось показать экран');
     },
   });
   const canShare = useCanShareScreen();
