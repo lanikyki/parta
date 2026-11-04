@@ -69,7 +69,10 @@ function Bubble({ m, streaming, smart }: { m: Msg; streaming?: boolean; smart?: 
   );
 }
 
-export function Assistant({ name, grade: initialGrade, ai }: { name: string; grade: string; ai: boolean }) {
+/** Сколько вопросов осталось в этом месяце. upgrade — показать ссылку на тарифы (репетиторам). */
+export type ChatQuota = { used: number; limit: number; next: string; upgrade: boolean };
+
+export function Assistant({ name, grade: initialGrade, ai, quota }: { name: string; grade: string; ai: boolean; quota?: ChatQuota }) {
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const [text, setText] = useState('');
   const [grade, setGrade] = useState(initialGrade || '7');
@@ -78,6 +81,8 @@ export function Assistant({ name, grade: initialGrade, ai }: { name: string; gra
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [retry, setRetry] = useState<{ q: string; base: Msg[] } | null>(null);
+  const [upgrade, setUpgrade] = useState(false);
+  const [used, setUsed] = useState(quota?.used ?? 0);
   const abortRef = useRef<AbortController | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
@@ -112,6 +117,7 @@ export function Assistant({ name, grade: initialGrade, ai }: { name: string; gra
     if (taRef.current) taRef.current.style.height = '';
     setError('');
     setRetry(null);
+    setUpgrade(false);
     setBusy(true);
     const ctrl = new AbortController();
     abortRef.current = ctrl;
@@ -214,6 +220,14 @@ export function Assistant({ name, grade: initialGrade, ai }: { name: string; gra
           {error && (
             <div className="mt-6 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-2xl bg-danger-soft px-4 py-3 text-[15px] text-danger-600">
               <p className="min-w-0 flex-1 basis-60">{error}</p>
+              {upgrade && (
+                <a
+                  href="/billing"
+                  className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full bg-white px-3.5 text-[14px] font-medium text-danger-600 shadow-soft hover:bg-white/80"
+                >
+                  Выбрать тариф
+                </a>
+              )}
               {retry && (
                 <button
                   type="button"
@@ -334,7 +348,24 @@ export function Assistant({ name, grade: initialGrade, ai }: { name: string; gra
               </button>
             )}
           </form>
-          <p className="mt-2 text-center text-[12px] text-ink-3">Помощник может ошибаться — сверяйтесь с учебником и репетитором.</p>
+          <p className="mt-2 text-center text-[12px] text-ink-3">
+            {quota && (
+              <>
+                Осталось {Math.max(0, quota.limit - used)} из {quota.limit} вопросов в этом месяце
+                {quota.upgrade && (
+                  <>
+                    {' · '}
+                    <a href="/billing" className="text-brand-700 hover:underline">
+                      больше — в тарифах
+                    </a>
+                  </>
+                )}
+                <br className="sm:hidden" />
+                <span className="hidden sm:inline"> · </span>
+              </>
+            )}
+            Помощник может ошибаться — сверяйтесь с учебником и репетитором.
+          </p>
         </div>
       </div>
     </main>

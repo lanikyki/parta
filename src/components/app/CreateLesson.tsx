@@ -1,13 +1,16 @@
 'use client';
 
 import { Plus, X } from 'lucide-react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { SUBJECTS } from '@/lib/brand';
+import { PLANS, type PlanId } from '@/lib/plans';
 
-export function CreateLesson() {
+export function CreateLesson({ plan = null }: { plan?: PlanId | null }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
+  const [kind, setKind] = useState('individual');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [subject, setSubject] = useState('');
@@ -31,7 +34,7 @@ export function CreateLesson() {
         body: JSON.stringify({ ...f, startsAt, durationMin: Number(f.durationMin) }),
       });
       const out = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(out.error || 'Не удалось создать урок');
+      if (!res.ok) throw new Error(out.error || 'Не удалось создать урок');
       if (f.now === '1') router.push(`/lesson/${out.code}`);
       else {
         setOpen(false);
@@ -89,13 +92,13 @@ export function CreateLesson() {
           </label>
           <label className="field">
             Формат
-            <select className="input" name="kind" defaultValue="individual">
+            <select className="input" name="kind" value={kind} onChange={(e) => setKind(e.target.value)}>
               <option value="individual">Индивидуальный</option>
-              <option value="group">Групповой (до 20)</option>
+              <option value="group">Групповой (до 20)</option>
             </select>
           </label>
           <label className="field min-w-0">
-            Дата и время
+            Дата и время
             <input className="input min-w-0" type="datetime-local" name="startsAt" />
           </label>
           <label className="field">
@@ -103,12 +106,23 @@ export function CreateLesson() {
             <select className="input" name="durationMin" defaultValue="60">
               {[30, 45, 60, 90, 120].map((m) => (
                 <option key={m} value={m}>
-                  {m} минут
+                  {m} минут
                 </option>
               ))}
             </select>
           </label>
         </div>
+        {kind === 'group' && plan !== 'pro' && (
+          <p className="rounded-xl bg-tint px-4 py-3 text-[14px] text-ink">
+            {plan === 'start'
+              ? `По тарифу «${PLANS.start.name}» видео — один на один: с видео будете вы и один ученик, остальные — на доске и в чате.`
+              : 'Без подписки видео есть только в пробном уроке, доска и чат — всегда.'}{' '}
+            Групповые видеоуроки до {PLANS.pro.video} человек — в тарифе «{PLANS.pro.name}».{' '}
+            <Link href="/billing" className="font-medium text-brand-700 hover:underline">
+              Тарифы
+            </Link>
+          </p>
+        )}
         {error && <p className="rounded-xl bg-danger-soft px-4 py-3 text-[15px] text-danger-600">{error}</p>}
         <div className="mt-2 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
           <button type="submit" name="now" value="0" className="btn btn-line" disabled={busy}>
