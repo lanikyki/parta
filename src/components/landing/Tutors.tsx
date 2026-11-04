@@ -2,23 +2,23 @@ import { Check, Link2, ListChecks } from 'lucide-react';
 import Link from 'next/link';
 
 const POINTS = [
-  'Отправьте ученику ссылку-приглашение — он сразу появится в вашем списке',
-  'Переписка с каждым учеником, а о новых сообщениях напомним письмом',
-  'Расписание, доски и конспекты уроков всегда под рукой',
-  'ИИ подберёт задачи по теме и составит конспект урока',
+  'Отправьте ученику ссылку-приглашение — он сразу появится в вашем списке',
+  'Переписка с каждым учеником, а о новых сообщениях напомним письмом',
+  'Расписание, доски и конспекты уроков всегда под рукой',
+  'ИИ подберёт задачи по теме и составит конспект урока',
 ];
 
 function DashboardMock() {
   const lessons = [
-    ['16:00', 'Алгебра · 9 класс', 'Миша К.', true],
-    ['17:30', 'Английский язык · группа', '3 ученика', false],
+    ['16:00', 'Алгебра · 9 класс', 'Миша К.', true],
+    ['17:30', 'Английский язык · группа', '3 ученика', false],
     ['19:00', 'Программирование', 'Лиза П.', false],
   ] as const;
   return (
     <div className="rounded-[24px] bg-white p-4 text-ink shadow-lift sm:p-6">
       <div className="flex items-center justify-between gap-3">
-        <p className="min-w-0 font-medium">Уроки на сегодня</p>
-        <span className="shrink-0 rounded-full bg-tint px-3 py-1 font-mono text-[11px] whitespace-nowrap text-brand-800">3 урока</span>
+        <p className="min-w-0 font-medium">Уроки на сегодня</p>
+        <span className="shrink-0 rounded-full bg-tint px-3 py-1 font-mono text-[11px] whitespace-nowrap text-brand-800">3 урока</span>
       </div>
       <ul className="mt-4 grid grid-cols-1 gap-2">
         {lessons.map(([time, title, who, live]) => (
@@ -47,7 +47,7 @@ function DashboardMock() {
           <ListChecks size={16} /> ИИ-подборка задач
         </p>
         <p className="mt-1.5 text-[14px] leading-snug text-ink-2">
-          Теорема Виета, 9 класс, средний уровень — 5 задач готовы, можно вставить на доску.
+          Теорема Виета, 9 класс, средний уровень — 5 задач готовы, можно вставить на доску.
         </p>
       </div>
     </div>
@@ -60,7 +60,7 @@ export function Tutors() {
       <div className="grid grid-cols-1 items-center gap-10 overflow-hidden rounded-[28px] bg-brand-950 px-5 py-12 text-white sm:rounded-[36px] sm:px-10 lg:grid-cols-2 lg:gap-14 lg:px-14 lg:py-16">
         <div data-reveal>
           <p className="tag text-accent">Кабинет репетитора</p>
-          <h2 className="mt-4 text-[34px] leading-[1.08] font-medium sm:text-[44px]">Все ученики и уроки — в одном месте</h2>
+          <h2 className="mt-4 text-[34px] leading-[1.08] font-medium sm:text-[44px]">Все ученики и уроки — в одном месте</h2>
           <ul className="mt-8 grid gap-3.5">
             {POINTS.map((p) => (
               <li key={p} className="flex gap-3 text-[17px] leading-snug text-white/85">
@@ -76,7 +76,7 @@ export function Tutors() {
               Начать бесплатно
             </Link>
             <Link href="/login" className="btn btn-glass btn-lg">
-              Войти в кабинет
+              Войти в кабинет
             </Link>
           </div>
         </div>

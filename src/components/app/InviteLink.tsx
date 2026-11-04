@@ -12,7 +12,7 @@ export function InviteLink({ code, className = '', label = 'Скопироват
   return (
     <button
       type="button"
-      className={`btn btn-soft h-auto min-h-11 py-2.5 text-center leading-tight whitespace-normal ${className}`}
+      className={`btn btn-soft h-auto min-h-11 px-4 py-2.5 text-center leading-tight whitespace-normal ${className}`}
       onClick={async () => {
         const url = `${shareOrigin()}/invite/${code}`;
         try {

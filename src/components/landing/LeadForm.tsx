@@ -22,10 +22,10 @@ export function LeadForm() {
         body: JSON.stringify(data),
       });
       const out = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(out.error || 'Не получилось отправить вопрос');
+      if (!res.ok) throw new Error(out.error || 'Не получилось отправить вопрос');
       setState('done');
     } catch (err) {
-      setError((err as Error).message === 'Failed to fetch' ? 'Нет связи с сервером. Проверьте интернет и попробуйте ещё раз.' : (err as Error).message);
+      setError((err as Error).message === 'Failed to fetch' ? 'Нет связи с сервером. Проверьте интернет и попробуйте ещё раз.' : (err as Error).message);
       setState('idle');
     }
   }
@@ -38,7 +38,7 @@ export function LeadForm() {
             <CircleCheck size={32} />
           </span>
           <h3 className="mt-5 text-2xl font-medium">Вопрос отправлен</h3>
-          <p className="mx-auto mt-2 max-w-[320px] text-ink-2">Спасибо! Ответим по контакту, который вы оставили.</p>
+          <p className="mx-auto mt-2 max-w-[320px] text-ink-2">Спасибо! Ответим по контакту, который вы оставили.</p>
         </div>
       </div>
     );
@@ -47,15 +47,15 @@ export function LeadForm() {
     <form method="post" onSubmit={onSubmit} className="grid grid-cols-1 gap-4 rounded-[24px] bg-white p-5 text-ink sm:p-8">
       <div>
         <h3 className="text-2xl font-medium">Остались вопросы?</h3>
-        <p className="mt-1 text-ink-2">Напишите — ответим на почту или в Telegram.</p>
+        <p className="mt-1 text-ink-2">Напишите — ответим на почту или в Telegram.</p>
       </div>
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
         <label className="field">
           Как вас зовут
           <input className="input" name="name" required minLength={2} maxLength={60} autoComplete="name" placeholder="Имя" />
         </label>
         <label className="field">
-          Как с вами связаться
+          Как с вами связаться
           <input className="input" name="contact" required minLength={5} maxLength={80} placeholder="Почта или Telegram" />
         </label>
       </div>
@@ -76,7 +76,7 @@ export function LeadForm() {
         {state === 'sending' ? 'Отправляем…' : 'Отправить вопрос'}
       </button>
       <WaitHint show={!ready} />
-      <p className="text-center text-[13px] text-ink-3">Нажимая кнопку, вы соглашаетесь на обработку персональных данных.</p>
+      <p className="text-center text-[13px] text-ink-3">Нажимая кнопку, вы соглашаетесь на обработку персональных данных.</p>
     </form>
   );
 }

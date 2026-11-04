@@ -40,12 +40,12 @@ export function Hero({ loggedIn }: { loggedIn: boolean }) {
               </span>
             </h1>
             <p className="mt-6 max-w-[33rem] text-lg leading-relaxed text-white/85 sm:text-xl">
-              Видеосвязь, общая доска-тетрадь, презентации и переписка с учениками — в одной вкладке браузера. Для любого
-              предмета: от математики и английского до программирования и музыки.
+              Видеосвязь, общая доска-тетрадь, презентации и переписка с учениками — в одной вкладке браузера. Для любого
+              предмета: от математики и английского до программирования и музыки.
             </p>
             <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
               <Link href={loggedIn ? '/dashboard' : '/register?role=tutor'} className="btn btn-white btn-lg">
-                {loggedIn ? 'Перейти в кабинет' : 'Начать бесплатно'}
+                {loggedIn ? 'Перейти в кабинет' : 'Начать бесплатно'}
               </Link>
               <a href="#how" className="btn btn-glass btn-lg">
                 Как это работает

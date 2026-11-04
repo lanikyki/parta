@@ -25,8 +25,8 @@ export function AuthShell({ title, text, children }: { title: string; text?: str
           <path className="draw-path" style={{ '--dur': '1.6s', '--delay': '300ms' } as React.CSSProperties} d="M50 40Q120 380 190 40" pathLength={1} fill="none" stroke="#ff5a5f" strokeWidth="5" strokeLinecap="round" />
           <path className="draw-path" style={{ '--dur': '1.6s', '--delay': '900ms' } as React.CSSProperties} d="M140 200C200 120 260 160 300 90S360 60 380 40" pathLength={1} fill="none" stroke="#ffe066" strokeWidth="5" strokeLinecap="round" />
         </svg>
-        <p className="tag relative text-white/70">Для репетиторов и учеников</p>
-        <p className="relative mt-4 max-w-[440px] text-[34px] leading-[1.1] font-medium">Видео, доска и переписка — в одной вкладке браузера</p>
+        <p className="tag relative text-white/70">Для репетиторов и учеников</p>
+        <p className="relative mt-4 max-w-[440px] text-[34px] leading-[1.1] font-medium">Видео, доска и переписка — в одной вкладке браузера</p>
       </aside>
     </div>
   );

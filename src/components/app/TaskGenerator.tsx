@@ -27,7 +27,7 @@ export function TaskGenerator() {
       });
       // Сервер, пока ИИ думает, шлёт пробелы — поэтому ошибка приходит в поле error даже при коде 200
       const out = await res.json().catch(() => ({}));
-      if (!res.ok || out.error || !out.text) throw new Error(out.error || 'ИИ не ответил, попробуйте ещё раз');
+      if (!res.ok || out.error || !out.text) throw new Error(out.error || 'ИИ не ответил, попробуйте ещё раз');
       setText(String(out.text));
     } catch (err) {
       setError((err as Error).message);
@@ -42,11 +42,11 @@ export function TaskGenerator() {
         <span className="grid h-9 w-9 place-items-center rounded-full bg-accent-soft text-accent-600">
           <ListChecks size={18} />
         </span>
-        Задачи от ИИ
+        Задачи от ИИ
       </h2>
-      <p className="mt-2 text-[15px] text-ink-2">Подборка задач по теме — для урока или домашнего задания.</p>
+      <p className="mt-2 text-[15px] text-ink-2">Подборка задач по теме — для урока или домашнего задания.</p>
       <form onSubmit={onSubmit} className="mt-4 grid grid-cols-1 gap-3">
-        <input className="input" name="topic" required maxLength={200} placeholder="Тема, например: теорема Виета" />
+        <input className="input" name="topic" required maxLength={200} placeholder="Например: теорема Виета" />
         <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.25fr)_minmax(0,0.95fr)] gap-2">
           <select className="input pr-7 pl-3 [background-position:right_6px_center]" name="grade" defaultValue="9" aria-label="Класс">
             {GRADES.map((g) => (
@@ -71,7 +71,7 @@ export function TaskGenerator() {
         <button type="submit" className="btn btn-soft" disabled={busy}>
           {busy ? `Составляю задачи…${sec >= 3 ? ` ${formatSec(sec)}` : ''}` : 'Составить'}
         </button>
-        {busy && sec >= 15 && <p className="text-[13px] text-ink-3">ИИ подбирает задачи — обычно это занимает до минуты.</p>}
+        {busy && sec >= 15 && <p className="text-[13px] text-ink-3">ИИ подбирает задачи — обычно это занимает до минуты.</p>}
       </form>
       {error && <p className="mt-3 rounded-xl bg-danger-soft px-4 py-3 text-[14px] text-danger-600">{error}</p>}
       {text && (

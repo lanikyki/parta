@@ -34,7 +34,7 @@ export function LessonMock() {
             <span className="animate-blink h-[1.3cqw] w-[1.3cqw] rounded-full bg-mint" />
             Идёт урок
           </span>
-          <span className="truncate text-[max(10px,2.5cqw)] font-medium">Алгебра · 9 класс</span>
+          <span className="truncate text-[max(10px,2.5cqw)] font-medium">Алгебра · 9 класс</span>
           <span className="ml-auto font-mono text-[max(9px,2.1cqw)] text-ink-3">24:15</span>
         </div>
 
@@ -113,7 +113,7 @@ export function LessonMock() {
               </div>
             </div>
 
-            <span className="absolute bottom-[1.6cqw] left-[11.5cqw] font-mono text-[max(8px,1.7cqw)] text-ink-3">Лист 2 из 4</span>
+            <span className="absolute bottom-[1.6cqw] left-[11.5cqw] font-mono text-[max(8px,1.7cqw)] text-ink-3">Лист 2 из 4</span>
           </div>
 
           {/* Видео и чат */}
@@ -132,7 +132,7 @@ export function LessonMock() {
             </div>
             <div className="mt-auto grid gap-[1cqw] text-[max(9px,1.9cqw)] leading-snug">
               <div className="pop-in w-fit max-w-full rounded-[1.4cqw] rounded-bl-[0.4cqw] bg-white px-[1.4cqw] py-[0.9cqw] shadow-soft" style={d(4400)}>
-                <b className="block font-medium text-accent-600">Миша</b>Корни −2 и 2!
+                <b className="block font-medium text-accent-600">Миша</b>Корни −2 и 2!
               </div>
               <div className="pop-in ml-auto w-fit max-w-full rounded-[1.4cqw] rounded-br-[0.4cqw] bg-brand px-[1.4cqw] py-[0.9cqw] text-white" style={d(5200)}>
                 Верно! Где вершина?
@@ -170,7 +170,7 @@ export function LessonMock() {
         </span>
         <span className="text-[max(10px,2.2cqw)] leading-tight">
           <b className="block font-semibold">Конспект сохранён</b>
-          <span className="text-ink-3">в личном кабинете</span>
+          <span className="text-ink-3">в личном кабинете</span>
         </span>
       </div>
     </div>
