@@ -18,8 +18,8 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
   const tutor = invite ? await inviter(invite) : null;
   return (
     <AuthShell
-      title="Вход в кабинет"
-      text={tutor ? `Войдите — и ${tutor.name} появится в вашем кабинете.` : 'Уроки, сообщения, конспекты и ИИ-помощник — после входа.'}
+      title="Вход в кабинет"
+      text={tutor ? `Войдите — и ${tutor.name} появится в вашем кабинете.` : 'Уроки, сообщения, конспекты и ИИ-помощник — после входа.'}
     >
       <Suspense>
         <AuthForm mode="login" />

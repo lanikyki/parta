@@ -19,9 +19,9 @@ export function TestMail() {
           try {
             const res = await fetch('/api/admin/test-mail', { method: 'POST' });
             const out = await res.json().catch(() => ({}));
-            setState(res.ok ? { ok: true, text: `Письмо отправлено на ${out.to}. Проверьте ящик (и папку «Спам»).` } : { ok: false, text: out.error || 'Не получилось' });
+            setState(res.ok ? { ok: true, text: `Письмо отправлено на ${out.to}. Проверьте ящик (и папку «Спам»).` } : { ok: false, text: out.error || 'Не получилось' });
           } catch {
-            setState({ ok: false, text: 'Нет связи с сайтом' });
+            setState({ ok: false, text: 'Нет связи с сайтом' });
           }
           setBusy(false);
         }}

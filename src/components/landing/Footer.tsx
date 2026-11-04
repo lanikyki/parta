@@ -20,7 +20,7 @@ export function Footer() {
         <nav className="grid content-start gap-3 text-[15px]">
           <p className="tag text-ink-3">Аккаунт</p>
           <Link href="/register?role=tutor" className="hover:text-brand-700">Регистрация</Link>
-          <Link href="/login" className="hover:text-brand-700">Вход в кабинет</Link>
+          <Link href="/login" className="hover:text-brand-700">Вход в кабинет</Link>
           <Link href="/assistant" className="hover:text-brand-700">ИИ-помощник</Link>
           <a href="/#lead" className="hover:text-brand-700">Задать вопрос</a>
         </nav>

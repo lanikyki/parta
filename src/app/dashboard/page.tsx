@@ -119,8 +119,8 @@ async function People({ user }: { user: User }) {
       ) : (
         <p className="mt-2 text-[15px] text-ink-2">
           {tutor
-            ? 'Ученик появится здесь после первого урока с вами или когда зарегистрируется по вашей ссылке-приглашению.'
-            : 'Репетитор появится здесь после первого урока с ним или когда вы перейдёте по его ссылке-приглашению.'}
+            ? 'Ученик появится здесь после первого урока с вами или когда зарегистрируется по вашей ссылке-приглашению.'
+            : 'Репетитор появится здесь после первого урока с ним или когда вы перейдёте по его ссылке-приглашению.'}
         </p>
       )}
       {people.length > shown.length && (
@@ -131,15 +131,46 @@ async function People({ user }: { user: User }) {
       {invite && (
         <div className="mt-4 grid gap-2 border-t border-line pt-4">
           <InviteLink code={invite} className="w-full" />
-          <p className="text-[13px] text-ink-3">Отправьте ссылку новому ученику: он зарегистрируется и сразу появится в этом списке.</p>
+          <p className="text-[13px] text-ink-3">Отправьте ссылку новому ученику: он зарегистрируется и сразу появится в этом списке.</p>
         </div>
       )}
       {!tutor && supportEnabled() && (
         <Link href="/messages?support=1" className="mt-4 flex items-center gap-2 border-t border-line pt-4 text-[14px] text-ink-2 hover:text-ink">
-          <LifeBuoy size={16} className="text-brand-700" /> Вопрос по сайту? Напишите в поддержку
+          <LifeBuoy size={16} className="text-brand-700" /> Вопрос по сайту? Напишите в поддержку
         </Link>
       )}
     </section>
+  );
+}
+
+// Длинный список уроков не растягивает кабинет: сначала 10, остальные — по кнопке
+const FIRST_LESSONS = 10;
+
+function LessonList({ lessons, tutorView }: { lessons: Row[]; tutorView: boolean }) {
+  const rest = lessons.slice(FIRST_LESSONS);
+  return (
+    <>
+      <ul className="mt-4 grid grid-cols-1 gap-3">
+        {lessons.slice(0, FIRST_LESSONS).map((l) => (
+          <LessonCard key={l.code} l={l} tutorView={tutorView} />
+        ))}
+      </ul>
+      {rest.length > 0 && (
+        <details className="group mt-3">
+          <summary className="btn btn-line mx-auto flex w-fit cursor-pointer list-none [&::-webkit-details-marker]:hidden">
+            <span className="group-open:hidden">
+              Показать ещё {rest.length} {plural(rest.length, 'урок', 'урока', 'уроков')}
+            </span>
+            <span className="hidden group-open:inline">Скрыть старые уроки</span>
+          </summary>
+          <ul className="mt-3 grid grid-cols-1 gap-3">
+            {rest.map((l) => (
+              <LessonCard key={l.code} l={l} tutorView={tutorView} />
+            ))}
+          </ul>
+        </details>
+      )}
+    </>
   );
 }
 
@@ -152,7 +183,7 @@ async function TutorView({ user }: { user: User }) {
     `select l.code, l.title, l.subject, l.kind, l.starts_at, l.duration_min, l.summary, l.summary_at, l.created_at,
             (select count(*) from lesson_members m where m.lesson_id = l.id)::int as members
        from lessons l where l.owner_id = $1
-      order by coalesce(l.starts_at, l.created_at) desc limit 100`,
+      order by coalesce(l.starts_at, l.created_at) desc limit 500`,
     [user.id],
   );
   return (
@@ -163,15 +194,11 @@ async function TutorView({ user }: { user: User }) {
           <CreateLesson />
         </div>
         {lessons.length ? (
-          <ul className="mt-4 grid grid-cols-1 gap-3">
-            {lessons.map((l) => (
-              <LessonCard key={l.code} l={l} tutorView />
-            ))}
-          </ul>
+          <LessonList lessons={lessons} tutorView />
         ) : (
           <div className="mt-4">
             <Empty>
-              Уроков пока нет. Нажмите «Новый урок» и отправьте ученику ссылку — для входа на урок регистрация не нужна.
+              Уроков пока нет. Нажмите «Новый урок» и отправьте ученику ссылку — для входа на урок регистрация не нужна.
             </Empty>
           </div>
         )}
@@ -183,10 +210,10 @@ async function TutorView({ user }: { user: User }) {
           <h2 className="text-lg font-medium">Как провести урок</h2>
           <ol className="mt-3 grid gap-2.5 text-[15px] text-ink-2">
             {[
-              'Создайте урок и скопируйте ссылку.',
-              'Отправьте ссылку ученику — в «Сообщениях» или в любом мессенджере.',
-              'Откройте урок: доска, видео и чат уже готовы.',
-              'В конце нажмите «Итоги» — ИИ соберёт конспект.',
+              'Создайте урок и скопируйте ссылку.',
+              'Отправьте ссылку ученику — в «Сообщениях» или в любом мессенджере.',
+              'Откройте урок: доска, видео и чат уже готовы.',
+              'В конце нажмите «Итоги» — ИИ соберёт конспект.',
             ].map((t, i) => (
               <li key={t} className="flex gap-3">
                 <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-tint font-mono text-[12px] text-brand-800">{i + 1}</span>
@@ -204,28 +231,24 @@ async function StudentView({ user }: { user: User }) {
   const lessons = await q<Row>(
     `select l.code, l.title, l.subject, l.kind, l.starts_at, l.duration_min, l.summary, l.summary_at, l.created_at, u.name as tutor
        from lesson_members m join lessons l on l.id = m.lesson_id join users u on u.id = l.owner_id
-      where m.user_id = $1 order by m.joined_at desc limit 100`,
+      where m.user_id = $1 order by m.joined_at desc limit 500`,
     [user.id],
   );
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_380px]">
       <section className="grid content-start gap-6">
         <div className="card p-6">
-          <h2 className="text-lg font-medium">Войти в урок</h2>
+          <h2 className="text-lg font-medium">Войти в урок</h2>
           <p className="mt-1 mb-4 text-[15px] text-ink-2">Вставьте ссылку, которую прислал репетитор.</p>
           <JoinByCode />
         </div>
         <div>
           <h2 className="text-xl font-medium">Мои уроки</h2>
           {lessons.length ? (
-            <ul className="mt-4 grid grid-cols-1 gap-3">
-              {lessons.map((l) => (
-                <LessonCard key={l.code} l={l} tutorView={false} />
-              ))}
-            </ul>
+            <LessonList lessons={lessons} tutorView={false} />
           ) : (
             <div className="mt-4">
-              <Empty>Здесь появятся уроки, на которых вы были, и конспекты к ним.</Empty>
+              <Empty>Здесь появятся уроки, на которых вы были, и конспекты к ним.</Empty>
             </div>
           )}
         </div>
@@ -236,7 +259,7 @@ async function StudentView({ user }: { user: User }) {
             <Bot size={22} />
           </span>
           <h2 className="mt-4 text-xl font-medium">ИИ-помощник</h2>
-          <p className="mt-1 text-white/80">Объяснит тему, проверит решение и подскажет, с чего начать задачу.</p>
+          <p className="mt-1 text-white/80">Объяснит тему, проверит решение и подскажет, с чего начать задачу.</p>
           <span className="mt-4 inline-flex items-center gap-1.5 font-medium">
             Задать вопрос <ArrowRight size={17} className="transition-transform group-hover:translate-x-1" />
           </span>
@@ -270,18 +293,18 @@ async function AdminCard() {
         <span className="text-[15px] text-ink-2">
           {leads ? (
             <>
-              <b className="font-medium text-accent-600">{leads}</b> {plural(leads, 'новое обращение', 'новых обращения', 'новых обращений')} с сайта
+              <b className="font-medium text-accent-600">{leads}</b> {plural(leads, 'новое обращение', 'новых обращения', 'новых обращений')} с сайта
             </>
           ) : (
-            'Новых обращений с сайта нет'
+            'Новых обращений с сайта нет'
           )}
           {support > 0 && (
             <>
               {' · '}
-              <b className="font-medium text-accent-600">{support}</b> в поддержке
+              <b className="font-medium text-accent-600">{support}</b> в поддержке
             </>
           )}
-          {' · '}за неделю {s?.users ?? 0} {plural(s?.users ?? 0, 'новый пользователь', 'новых пользователя', 'новых пользователей')}
+          {' · '}за неделю {s?.users ?? 0} {plural(s?.users ?? 0, 'новый пользователь', 'новых пользователя', 'новых пользователей')}
         </span>
       </span>
       <span className="inline-flex items-center gap-1.5 text-[15px] font-medium text-brand-700">
@@ -309,7 +332,7 @@ export default async function Dashboard() {
       <main className="wrap py-8 sm:py-10">
         <h1 className="text-[30px] leading-tight font-medium sm:text-[36px]">Здравствуйте, {first}!</h1>
         <p className="mt-1 mb-8 text-ink-2">
-          {user.role === 'tutor' ? 'Ваши уроки, ученики и конспекты.' : 'Уроки, репетиторы, конспекты и помощник по учёбе.'}
+          {user.role === 'tutor' ? 'Ваши уроки, ученики и конспекты.' : 'Уроки, репетиторы, конспекты и помощник по учёбе.'}
         </p>
         {isAdmin(user) && <AdminCard />}
         {user.role === 'tutor' ? <TutorView user={user} /> : <StudentView user={user} />}

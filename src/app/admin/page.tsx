@@ -59,7 +59,7 @@ function Stat({ icon, title, value, note }: { icon: React.ReactNode; title: stri
 }
 
 function Events({ rows, showFilterLinks = true, compact = false }: { rows: EventRow[]; showFilterLinks?: boolean; compact?: boolean }) {
-  if (!rows.length) return <p className="p-5 text-[15px] text-ink-2">Пока ничего не происходило.</p>;
+  if (!rows.length) return <p className="p-5 text-[15px] text-ink-2">Пока ничего не происходило.</p>;
   return (
     <div className="overflow-x-auto">
       <table className={`w-full text-left text-[14px] ${compact ? 'min-w-[620px]' : 'min-w-[760px]'}`}>
@@ -152,10 +152,11 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
   );
   const s = stats ?? {};
 
-  const tabs: [Tab, string, string?][] = [
+  // [вкладка, название, счётчик, подпись к счётчику (на телефоне прячется, чтобы не вылезать за кнопку)]
+  const tabs: [Tab, string, string?, string?][] = [
     ['overview', 'Обзор'],
     ['users', 'Пользователи', String(s.users ?? 0)],
-    ['leads', 'Обращения', s.leads_new ? `${s.leads_new} новых` : undefined],
+    ['leads', 'Обращения', s.leads_new ? String(s.leads_new) : undefined, 'новых'],
     ['events', 'Журнал'],
   ];
 
@@ -167,18 +168,18 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
       q<UserRow>("select id, name, email, role, grade, created_at from users order by created_at desc limit 6"),
     ]);
     const status: [string, boolean, string][] = [
-      ['Почта (коды и уведомления)', mailConfigured(), 'SMTP_USER и SMTP_PASS'],
-      ['Поддержка в «Сообщениях»', supportEnabled(), 'ADMIN_EMAILS'],
-      ['ИИ-помощник', aiConfigured(), 'AI_BASE_URL и AI_API_KEY'],
-      ['Видео', livekitConfigured(), 'LIVEKIT_URL и ключи'],
+      ['Почта (коды и уведомления)', mailConfigured(), 'SMTP_USER и SMTP_PASS'],
+      ['Поддержка в «Сообщениях»', supportEnabled(), 'ADMIN_EMAILS'],
+      ['ИИ-помощник', aiConfigured(), 'AI_BASE_URL и AI_API_KEY'],
+      ['Видео', livekitConfigured(), 'LIVEKIT_URL и ключи'],
     ];
     content = (
       <div className="grid gap-6">
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <Stat icon={<Users size={17} />} title="Пользователи" value={s.users ?? 0} note={`учеников ${s.students ?? 0} · репетиторов ${s.tutors ?? 0} · +${s.users_week ?? 0} за неделю`} />
-          <Stat icon={<ClipboardList size={17} />} title="Обращения с сайта" value={s.leads ?? 0} note={s.leads_new ? `${s.leads_new} ждут ответа` : 'все обработаны'} />
-          <Stat icon={<Video size={17} />} title="Уроки" value={s.lessons ?? 0} note={`+${s.lessons_week ?? 0} за неделю`} />
-          <Stat icon={<Bot size={17} />} title="Запросы к ИИ" value={s.ai_day ?? 0} note={`за сутки · ${s.ai_week ?? 0} за неделю · активных за неделю: ${s.active_week ?? 0}`} />
+          <Stat icon={<Users size={17} />} title="Пользователи" value={s.users ?? 0} note={`учеников ${s.students ?? 0} · репетиторов ${s.tutors ?? 0} · +${s.users_week ?? 0} за неделю`} />
+          <Stat icon={<ClipboardList size={17} />} title="Обращения с сайта" value={s.leads ?? 0} note={s.leads_new ? `${s.leads_new} ждут ответа` : 'все обработаны'} />
+          <Stat icon={<Video size={17} />} title="Уроки" value={s.lessons ?? 0} note={`+${s.lessons_week ?? 0} за неделю`} />
+          <Stat icon={<Bot size={17} />} title="Запросы к ИИ" value={s.ai_day ?? 0} note={`за сутки · ${s.ai_week ?? 0} за неделю · активных за неделю: ${s.active_week ?? 0}`} />
         </div>
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_380px]">
           <section className="card min-w-0 overflow-hidden">
@@ -225,7 +226,7 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
                     </span>
                   </li>
                 ))}
-                {!fresh.length && <li className="text-ink-2">Пока никто не зарегистрировался.</li>}
+                {!fresh.length && <li className="text-ink-2">Пока никто не зарегистрировался.</li>}
               </ul>
             </section>
             <section className="card p-5">
@@ -283,9 +284,9 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
                   <th className="px-4 py-2.5 font-normal">Кто</th>
                   <th className="px-4 py-2.5 font-normal">Роль</th>
                   <th className="px-4 py-2.5 font-normal">Зарегистрирован</th>
-                  <th className="px-4 py-2.5 font-normal">Был на сайте</th>
+                  <th className="px-4 py-2.5 font-normal">Был на сайте</th>
                   <th className="px-4 py-2.5 font-normal">Уроков</th>
-                  <th className="px-4 py-2.5 font-normal">Запросов к ИИ</th>
+                  <th className="px-4 py-2.5 font-normal">Запросов к ИИ</th>
                   <th className="px-4 py-2.5 font-normal" />
                 </tr>
               </thead>
@@ -314,7 +315,7 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
             </table>
           </div>
         ) : (
-          <p className="p-5 text-[15px] text-ink-2">{search ? 'Никого не нашлось.' : 'Пока никто не зарегистрировался.'}</p>
+          <p className="p-5 text-[15px] text-ink-2">{search ? 'Никого не нашлось.' : 'Пока никто не зарегистрировался.'}</p>
         )}
       </section>
     );
@@ -322,10 +323,10 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
     const leads = await q<LeadRow>('select * from leads order by (done_at is not null), created_at desc limit 300');
     content = (
       <section className="card p-5">
-        <h2 className="text-lg font-medium">Обращения с сайта</h2>
+        <h2 className="text-lg font-medium">Обращения с сайта</h2>
         <p className="mt-1 text-[14px] text-ink-2">
-          Вопросы из формы на главной странице. Ответьте человеку по указанному контакту и нажмите «Отметить обработанным» — обращение уйдёт вниз
-          списка. Сообщения в поддержку от пользователей — в разделе «Сообщения».
+          Вопросы из формы на главной странице. Ответьте человеку по указанному контакту и нажмите «Отметить обработанным» — обращение уйдёт вниз
+          списка. Сообщения в поддержку от пользователей — в разделе «Сообщения».
         </p>
         {leads.length ? (
           <ul className="mt-4 grid gap-2 @container">
@@ -385,9 +386,9 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
         <h1 className="flex items-center gap-3 text-[30px] leading-tight font-medium sm:text-[36px]">
           <Activity className="text-brand" size={30} /> Админка
         </h1>
-        <p className="mt-1 text-ink-2">Видно только администраторам из ADMIN_EMAILS. Здесь обращения, пользователи и журнал действий.</p>
+        <p className="mt-1 text-ink-2">Видно только администраторам из ADMIN_EMAILS. Здесь обращения, пользователи и журнал действий.</p>
         <nav className="mt-6 mb-6 grid grid-cols-2 gap-1 rounded-[14px] bg-white p-1 shadow-[inset_0_0_0_1px_var(--color-line)] sm:flex sm:w-fit sm:overflow-x-auto">
-          {tabs.map(([key, name, badge]) => (
+          {tabs.map(([key, name, badge, badgeNote]) => (
             <Link
               key={key}
               href={key === 'overview' ? '/admin' : `/admin?tab=${key}`}
@@ -396,13 +397,18 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
               }`}
             >
               {name}
-              {badge && <span className={`rounded-full px-2 py-0.5 text-[12px] ${tab === key ? 'bg-white/20' : 'bg-mist text-ink-3'}`}>{badge}</span>}
+              {badge && (
+                <span className={`rounded-full px-2 py-0.5 text-[12px] ${tab === key ? 'bg-white/20' : 'bg-mist text-ink-3'}`}>
+                  {badge}
+                  {badgeNote && <span className="hidden sm:inline"> {badgeNote}</span>}
+                </span>
+              )}
             </Link>
           ))}
         </nav>
         {content}
         <p className="mt-6 flex items-center gap-2 text-[13px] text-ink-3">
-          <Mail size={14} /> Содержание вопросов к ИИ, чатов и переписки здесь не показывается — только сами действия.
+          <Mail size={14} /> Содержание вопросов к ИИ, чатов и переписки здесь не показывается — только сами действия.
         </p>
       </main>
     </div>
