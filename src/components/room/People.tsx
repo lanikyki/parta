@@ -5,7 +5,7 @@ import { Ellipsis, LoaderCircle, Lock, Mic, MicOff, UserX, Video, VideoOff } fro
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { Me } from '@/components/board/sync';
-import { MOD_TOPIC, MenuItem, byRank, colorFor, initials, isHostP } from './parts';
+import { avatarOf, byRank, colorFor, initials, isHostP, MenuItem, MOD_TOPIC } from './parts';
 
 export type Moderation = { locked: boolean; removed: { who: string; name: string }[] };
 
@@ -101,13 +101,13 @@ export function People({
       });
       const out = await res.json().catch(() => ({}));
       if (!res.ok) {
-        showToast(out.error || 'Не получилось — попробуйте ещё раз');
+        showToast(out.error || 'Не получилось — попробуйте ещё раз');
         return false;
       }
       if (typeof out.locked === 'boolean') setMod(out);
       return true;
     } catch {
-      showToast('Нет связи с сервером — попробуйте ещё раз');
+      showToast('Нет связи с сервером — попробуйте ещё раз');
       return false;
     } finally {
       setBusy(false);
@@ -152,7 +152,7 @@ export function People({
 
   const remove = async () => {
     if (!confirm) return;
-    if (await act({ action: 'remove', identity: confirm.identity })) showToast(`${confirm.name} больше не в уроке`);
+    if (await act({ action: 'remove', identity: confirm.identity })) showToast(`${confirm.name} больше не в уроке`);
     setConfirm(null);
   };
 
@@ -172,15 +172,15 @@ export function People({
               const locked = e.target.checked;
               setMod((m) => m && { ...m, locked }); // переключатель срабатывает сразу, не дожидаясь сервера
               if (await act({ action: 'lock', locked }))
-                showToast(locked ? 'Вход закрыт: новые люди не смогут зайти в урок' : 'Вход открыт: зайти можно по ссылке');
+                showToast(locked ? 'Вход закрыт: новые люди не смогут зайти в урок' : 'Вход открыт: зайти можно по ссылке');
               else setMod((m) => m && { ...m, locked: !locked });
             }}
           />
           <span className="min-w-0">
             <span className="flex items-center gap-1.5 text-[15px]">
-              <Lock size={14} className="text-ink-3" /> Закрыть вход в урок
+              <Lock size={14} className="text-ink-3" /> Закрыть вход в урок
             </span>
-            <span className="block text-[12px] leading-snug text-ink-3 [@media(max-height:760px)]:hidden">Новые люди не смогут зайти по ссылке. Кто уже был на уроке — сможет вернуться.</span>
+            <span className="block text-[12px] leading-snug text-ink-3 [@media(max-height:760px)]:hidden">Новые люди не смогут зайти по ссылке. Кто уже был на уроке — сможет вернуться.</span>
           </span>
         </label>
       )}
@@ -190,12 +190,17 @@ export function People({
           const manage = host && !p.isLocal && !isHostP(p);
           return (
             <li key={p.identity} className="relative flex items-center gap-3 rounded-xl px-2.5 py-2">
-              <span
-                className="grid h-9 w-9 shrink-0 place-items-center rounded-full text-[13px] font-medium text-white"
-                style={{ background: colorFor(p.identity) }}
-              >
-                {initials(name)}
-              </span>
+              {avatarOf(p) ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={avatarOf(p)!} alt="" className="h-9 w-9 shrink-0 rounded-full object-cover" />
+              ) : (
+                <span
+                  className="grid h-9 w-9 shrink-0 place-items-center rounded-full text-[13px] font-medium text-white"
+                  style={{ background: colorFor(p.identity) }}
+                >
+                  {initials(name)}
+                </span>
+              )}
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-[15px]">
                   {name}
@@ -232,7 +237,7 @@ export function People({
                         disabled={busy}
                         danger
                       >
-                        Удалить из урока
+                        Удалить из урока
                       </MenuItem>
                     </div>
                   </>,
@@ -244,7 +249,7 @@ export function People({
       </ul>
       {host && mod && mod.removed.length > 0 && (
         <div className="max-h-[40%] shrink-0 overflow-y-auto border-t border-line p-2">
-          <p className="px-2.5 pt-1 pb-1 text-[12px] font-medium text-ink-3">Удалённые из урока · {mod.removed.length}</p>
+          <p className="px-2.5 pt-1 pb-1 text-[12px] font-medium text-ink-3">Удалённые из урока · {mod.removed.length}</p>
           {mod.removed.map((r) => (
             <div key={r.who} className="flex items-center gap-3 rounded-xl px-2.5 py-1.5">
               <span className="min-w-0 flex-1 truncate text-[15px] text-ink-2">{r.name}</span>
@@ -254,7 +259,7 @@ export function People({
                 disabled={busy}
                 aria-label={`Вернуть в урок: ${r.name}`}
                 onClick={async () => {
-                  if (await act({ action: 'restore', who: r.who })) showToast(`${r.name} снова может зайти в урок`);
+                  if (await act({ action: 'restore', who: r.who })) showToast(`${r.name} снова может зайти в урок`);
                 }}
               >
                 Вернуть
@@ -265,8 +270,8 @@ export function People({
       )}
       {confirm && (
         <ConfirmModal
-          title={`Удалить из урока: ${confirm.name}?`}
-          text="Участник сразу выйдет из урока и не сможет вернуться по ссылке с того же аккаунта или устройства. Передумаете — нажмите «Вернуть» внизу списка. Чтобы не зашёл никто новый, закройте вход в урок."
+          title={`Удалить из урока: ${confirm.name}?`}
+          text="Участник сразу выйдет из урока и не сможет вернуться по ссылке с того же аккаунта или устройства. Передумаете — нажмите «Вернуть» внизу списка. Чтобы не зашёл никто новый, закройте вход в урок."
           action="Удалить"
           busy={busy}
           onConfirm={remove}
