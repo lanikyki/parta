@@ -461,6 +461,18 @@ function checkAdmin(env) {
   return !bad.length;
 }
 
+// Оплата и звонки: на своём компьютере без ключей работает тестовый режим — это нормально
+function checkBilling(env) {
+  const shop = clean(env.YOOKASSA_SHOP_ID);
+  const secret = clean(env.YOOKASSA_SECRET_KEY);
+  if (shop && secret) log.ok(`Оплата: ЮKassa (магазин ${shop})${clean(env.YOOKASSA_RECURRING) === '1' ? ', автопродление включено' : ''}.`);
+  else if (shop || secret) log.bad('Оплата: заполнены не все поля — нужны YOOKASSA_SHOP_ID и YOOKASSA_SECRET_KEY.');
+  else log.skip('Оплата: тестовый режим — ЮKassa не подключена, оплата проходит тестовыми картами (деньги не списываются).');
+  if (clean(env.SMSRU_API_ID)) log.ok('Звонки для подтверждения телефона: SMS.ru.');
+  else log.skip('Звонки: тестовый режим — код подтверждения телефона показывается прямо на странице (SMSRU_API_ID не заполнен).');
+  if (!clean(env.LEGAL_NAME) || !clean(env.LEGAL_INN)) log.skip('Реквизиты для оферты (LEGAL_NAME, LEGAL_INN, LEGAL_OGRNIP) не заполнены — заполните до приёма оплаты.');
+}
+
 export async function runChecks({ brief = false, autofill = false, skipVideo = false } = {}) {
   const file = path.join(ROOT, '.env.local');
   const env = readEnv(file);
@@ -474,6 +486,7 @@ export async function runChecks({ brief = false, autofill = false, skipVideo = f
   const ai = await checkAI(env, { brief, autofill: autofill ? file : null });
   const mail = await checkMail(env);
   const admin = checkAdmin(env);
+  if (!brief) checkBilling(env);
   return { video, ai, mail, admin };
 }
 

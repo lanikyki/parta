@@ -43,6 +43,7 @@ const nextConfig: NextConfig = {
       // Загруженные картинки: даже если открыть файл напрямую, никакой код из него не выполнится
       { source: '/api/assets/:id', headers: [{ key: 'Content-Security-Policy', value: "default-src 'none'; frame-ancestors 'self'; sandbox" }] },
       { source: '/api/messages/files/:id', headers: [{ key: 'Content-Security-Policy', value: "default-src 'none'; frame-ancestors 'self'; sandbox" }] },
+      { source: '/api/avatar/:id', headers: [{ key: 'Content-Security-Policy', value: "default-src 'none'; frame-ancestors 'self'; sandbox" }] },
     ];
   },
 };
