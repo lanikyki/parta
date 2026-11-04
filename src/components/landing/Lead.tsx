@@ -2,7 +2,7 @@ import { Check } from 'lucide-react';
 import Link from 'next/link';
 import { LeadForm } from './LeadForm';
 
-const POINTS = ['Бесплатно', 'Без установки программ', 'Ученику хватит ссылки'];
+const POINTS = ['Пробный видеоурок — бесплатно', 'Без установки программ', 'Ученику хватит ссылки'];
 
 export function Lead({ loggedIn }: { loggedIn: boolean }) {
   return (

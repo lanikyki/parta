@@ -7,6 +7,7 @@ export const NAV = [
   { href: '/#for', label: 'Для кого' },
   { href: '/#start', label: 'Как начать' },
   { href: '/#subjects', label: 'Предметы' },
+  { href: '/#pricing', label: 'Тарифы' },
   { href: '/#faq', label: 'Вопросы' },
 ];
 
@@ -17,7 +18,7 @@ export function Header({ loggedIn }: { loggedIn: boolean }) {
         <Link href="/" aria-label="На главную" className="shrink-0">
           <Logo />
         </Link>
-        <nav className="hidden items-center gap-7 text-[15px] text-ink-2 lg:flex">
+        <nav className="hidden items-center gap-4 text-[15px] whitespace-nowrap text-ink-2 lg:flex xl:gap-7">
           {NAV.map((n) => (
             <a key={n.href} href={n.href} className="transition-colors hover:text-brand-700">
               {n.label}

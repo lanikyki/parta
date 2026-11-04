@@ -13,7 +13,7 @@ type CodeInfo = { email: string; wait?: number; devCode?: string; mail?: boolean
 async function post<T = Record<string, unknown>>(url: string, data: unknown): Promise<T> {
   const res = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(data) });
   const out = await res.json().catch(() => ({}));
-  if (!res.ok) throw Object.assign(new Error(out.error || 'Что-то пошло не так, попробуйте ещё раз'), { gone: Boolean(out.gone) });
+  if (!res.ok) throw Object.assign(new Error(out.error || 'Что-то пошло не так, попробуйте ещё раз'), { gone: Boolean(out.gone) });
   return out as T;
 }
 
@@ -67,7 +67,7 @@ function CodeStep({
   async function submit(e?: React.FormEvent) {
     e?.preventDefault();
     if (busy) return;
-    if (code.length !== 6) return setError('Введите 6 цифр из письма');
+    if (code.length !== 6) return setError('Введите 6 цифр из письма');
     setError('');
     setBusy(true);
     try {
@@ -98,38 +98,38 @@ function CodeStep({
         <MailCheck size={22} className="mt-0.5 shrink-0" />
         {state.mailError ? (
           <p>
-            Письмо с кодом на <b className="font-medium break-all">{state.email}</b> пока не отправилось.
+            Письмо с кодом на <b className="font-medium break-all">{state.email}</b> пока не отправилось.
           </p>
         ) : (
           <p>
-            {state.already ? 'Мы уже отправили код на ' : 'Отправили код на '}
-            <b className="font-medium break-all">{state.email}</b>. Введите 6 цифр из письма. Не видите письмо — загляните в папку «Спам».
+            {state.already ? 'Мы уже отправили код на ' : 'Отправили код на '}
+            <b className="font-medium break-all">{state.email}</b>. Введите 6 цифр из письма. Не видите письмо — загляните в папку «Спам».
           </p>
         )}
       </div>
       {state.mailError && (
         <p className="rounded-xl bg-[#fff4cc] px-4 py-3 text-[14px] text-ink">
-          {state.mailError} Нажмите «Отправить код ещё раз» чуть позже — или попросите код у владельца сайта: он записан в окне сервера.
+          {state.mailError} Нажмите «Отправить код ещё раз» чуть позже — или попросите код у владельца сайта: он записан в окне сервера.
           {state.devCode && (
             <span className="mt-1 block">
-              Код для проверки (виден только при запуске на своём компьютере): <b className="font-mono text-[15px]">{state.devCode}</b>
+              Код для проверки (виден только при запуске на своём компьютере): <b className="font-mono text-[15px]">{state.devCode}</b>
             </span>
           )}
         </p>
       )}
       {state.devCode && !state.mailError && (
         <p className="rounded-xl bg-[#fff4cc] px-4 py-3 text-[14px] text-ink">
-          Почта на сайте ещё не настроена, поэтому письмо не отправлено. Код для проверки: <b className="font-mono text-[15px]">{state.devCode}</b>
-          <span className="block text-ink-2">Его видно только при запуске на своём компьютере. Как включить письма — в README, раздел «Почта».</span>
+          Почта на сайте ещё не настроена, поэтому письмо не отправлено. Код для проверки: <b className="font-mono text-[15px]">{state.devCode}</b>
+          <span className="block text-ink-2">Его видно только при запуске на своём компьютере. Как включить письма — в README, раздел «Почта».</span>
         </p>
       )}
       {state.mail === false && !state.devCode && !state.mailError && (
         <p className="rounded-xl bg-[#fff4cc] px-4 py-3 text-[14px] text-ink">
-          Почта на сайте ещё не настроена, письмо не отправлено. Код записан в окне сервера — его может посмотреть владелец сайта.
+          Почта на сайте ещё не настроена, письмо не отправлено. Код записан в окне сервера — его может посмотреть владелец сайта.
         </p>
       )}
       <label className="field">
-        Код из письма
+        Код из письма
         <input
           className="input h-14 text-center font-mono text-[26px] tracking-[0.4em]"
           inputMode="numeric"
@@ -157,7 +157,7 @@ function CodeStep({
           <ArrowLeft size={16} /> Изменить email
         </button>
         {left > 0 ? (
-          <span className="text-ink-3">Новый код — через {left} с</span>
+          <span className="text-ink-3">Новый код — через {left} с</span>
         ) : (
           <button type="button" onClick={resend} className="py-1.5 font-medium text-brand-700 hover:underline">
             Отправить код ещё раз
@@ -213,7 +213,7 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
         info={codeInfo}
         purpose="register"
         autoSubmit
-        submitLabel="Подтвердить и войти"
+        submitLabel="Подтвердить и войти"
         onBack={() => setCodeInfo(null)}
         onSubmit={async (code) => {
           await post('/api/auth/verify', { email: codeInfo.email, code });
@@ -228,8 +228,8 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
         <div className="grid grid-cols-2 gap-1 rounded-[14px] bg-white p-1 shadow-[inset_0_0_0_1.5px_var(--color-line-2)]" role="radiogroup" aria-label="Кто вы">
           {(
             [
-              ['student', 'Я ученик'],
-              ['tutor', 'Я репетитор'],
+              ['student', 'Я ученик'],
+              ['tutor', 'Я репетитор'],
             ] as const
           ).map(([value, label]) => (
             <button
@@ -247,7 +247,7 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
       )}
       {mode === 'register' && (
         <label className="field">
-          {role === 'tutor' ? 'Имя и отчество' : 'Имя'}
+          {role === 'tutor' ? 'Имя и отчество' : 'Имя'}
           <input
             className="input"
             name="name"
@@ -292,14 +292,14 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
           minLength={mode === 'register' ? 8 : 1}
           maxLength={200}
           autoComplete={mode === 'register' ? 'new-password' : 'current-password'}
-          placeholder={mode === 'register' ? 'Не короче 8 символов' : ''}
+          placeholder={mode === 'register' ? 'Не короче 8 символов' : ''}
         />
       </label>
       {mode === 'register' && role === 'student' && (
         <label className="field">
           Класс или уровень
           <select className="input" name="grade" defaultValue={saved.grade || ''}>
-            <option value="">Не выбран</option>
+            <option value="">Не выбран</option>
             {GRADES.map((g) => (
               <option key={g} value={g}>
                 {gradeLabel(g)}
@@ -310,9 +310,22 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
       )}
       <ErrorBox text={error} />
       <button type="submit" className="btn btn-primary btn-lg mt-2 w-full" disabled={busy || !ready}>
-        {busy ? 'Подождите…' : mode === 'login' ? 'Войти' : 'Получить код на почту'}
+        {busy ? 'Подождите…' : mode === 'login' ? 'Войти' : 'Получить код на почту'}
       </button>
       <WaitHint show={!ready} />
+      {mode === 'register' && (
+        <p className="text-center text-[13px] leading-snug text-ink-3">
+          Регистрируясь, вы принимаете{' '}
+          <Link href="/legal/offer" target="_blank" className="underline hover:text-ink">
+            условия оферты
+          </Link>{' '}
+          и соглашаетесь на обработку персональных данных по{' '}
+          <Link href="/legal/privacy" target="_blank" className="underline hover:text-ink">
+            политике конфиденциальности
+          </Link>
+          .
+        </p>
+      )}
       <p className="text-center text-[15px] text-ink-2">
         {mode === 'login' ? (
           <>
@@ -350,7 +363,7 @@ export function ResetForm() {
       <CodeStep
         info={codeInfo}
         purpose="reset"
-        submitLabel="Сохранить пароль и войти"
+        submitLabel="Сохранить пароль и войти"
         onBack={() => setCodeInfo(null)}
         onSubmit={async (code) => {
           await post('/api/auth/reset/confirm', { email: codeInfo.email, code, password: pwRef.current?.value || '' });
@@ -388,7 +401,7 @@ export function ResetForm() {
       </label>
       <ErrorBox text={error} />
       <button type="submit" className="btn btn-primary btn-lg mt-2 w-full" disabled={busy || !ready}>
-        {busy ? 'Подождите…' : 'Получить код на почту'}
+        {busy ? 'Подождите…' : 'Получить код на почту'}
       </button>
       <WaitHint show={!ready} />
       <p className="text-center text-[15px] text-ink-2">

@@ -5,7 +5,7 @@ import { BRAND } from '@/lib/brand';
 export function Footer() {
   return (
     <footer className="border-t border-line">
-      <div className="wrap grid gap-10 py-12 md:grid-cols-[1.4fr_1fr_1fr]">
+      <div className="wrap grid gap-10 py-12 sm:grid-cols-2 lg:grid-cols-[1.4fr_1fr_1fr_1fr]">
         <div>
           <Logo />
           <p className="mt-4 max-w-[340px] text-[15px] leading-relaxed text-ink-2">{BRAND.description}</p>
@@ -15,6 +15,7 @@ export function Footer() {
           <a href="/#how" className="hover:text-brand-700">Возможности</a>
           <a href="/#for" className="hover:text-brand-700">Для кого</a>
           <a href="/#start" className="hover:text-brand-700">Как начать</a>
+          <Link href="/pricing" className="hover:text-brand-700">Тарифы</Link>
           <a href="/#faq" className="hover:text-brand-700">Вопросы</a>
         </nav>
         <nav className="grid content-start gap-3 text-[15px]">
@@ -23,6 +24,12 @@ export function Footer() {
           <Link href="/login" className="hover:text-brand-700">Вход в кабинет</Link>
           <Link href="/assistant" className="hover:text-brand-700">ИИ-помощник</Link>
           <a href="/#lead" className="hover:text-brand-700">Задать вопрос</a>
+        </nav>
+        <nav className="grid content-start gap-3 text-[15px]">
+          <p className="tag text-ink-3">Документы</p>
+          <Link href="/legal/offer" className="hover:text-brand-700">Публичная оферта</Link>
+          <Link href="/legal/privacy" className="hover:text-brand-700">Политика конфиденциальности</Link>
+          <Link href="/legal/contacts" className="hover:text-brand-700">Контакты и реквизиты</Link>
         </nav>
       </div>
       <div className="wrap">

@@ -1,8 +1,12 @@
 import { Plus } from 'lucide-react';
+import { PLANS, TRIAL_MIN, rub } from '@/lib/plans';
 import { SectionHead } from './SectionHead';
 
 const FAQ = [
-  ['Сколько это стоит?', 'Сейчас пользоваться сервисом можно бесплатно — и репетиторам, и ученикам.'],
+  [
+    'Сколько это стоит?',
+    `Ученикам — бесплатно. Репетитору бесплатны кабинет, переписка, доска и чат, а первый урок с видео — ${TRIAL_MIN} минут без оплаты. Дальше — подписка: «${PLANS.start.name}» за ${rub(PLANS.start.price.month)} в месяц (видеоуроки один на один) или «${PLANS.pro.name}» за ${rub(PLANS.pro.price.month)} (группы до ${PLANS.pro.video} человек и больше ИИ-функций).`,
+  ],
   [
     'Нужно ли что-то устанавливать?',
     'Нет. Уроки проходят в браузере — подойдут Chrome, Яндекс Браузер, Edge, Firefox и Safari на компьютере, планшете или телефоне.',
@@ -17,7 +21,7 @@ const FAQ = [
   ],
   [
     'Можно заниматься в группе?',
-    'Да. В одном уроке может быть до 20 участников: репетитор видит всех, а ученики могут писать на общей доске, если репетитор разрешит.',
+    `Да. В групповом уроке на тарифе «${PLANS.pro.name}» — до ${PLANS.pro.video} участников с видео: репетитор видит всех, а ученики могут писать на общей доске, если репетитор разрешит.`,
   ],
   [
     'Как работает переписка?',
@@ -31,7 +35,7 @@ const FAQ = [
 
 export function Faq() {
   return (
-    <section id="faq" className="wrap py-20 sm:py-28">
+    <section id="faq" className="wrap pb-20 sm:pb-28">
       <div className="grid grid-cols-1 gap-10 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] lg:gap-16">
         <SectionHead
           tag="Вопросы"
