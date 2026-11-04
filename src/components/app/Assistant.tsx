@@ -15,10 +15,10 @@ const MARK = '\u001e';
 const STARTERS = [
   { icon: Calculator, subject: 'Алгебра', text: 'Объясни, как решать квадратные уравнения через дискриминант' },
   { icon: Target, subject: 'Математика', text: 'Проверь решение: 3x + 5 = 20, значит x = 6' },
-  { icon: BookOpen, subject: 'Русский язык', text: 'Когда «не» с глаголами пишется слитно?' },
-  { icon: Languages, subject: 'Английский язык', text: 'Чем Present Perfect отличается от Past Simple?' },
-  { icon: FlaskConical, subject: 'Физика', text: 'Почему лёд плавает в воде? Объясни простыми словами' },
-  { icon: Sparkles, subject: 'Программирование', text: 'Составь план изучения Python с нуля на месяц' },
+  { icon: BookOpen, subject: 'Русский язык', text: 'Когда «не» с глаголами пишется слитно?' },
+  { icon: Languages, subject: 'Английский язык', text: 'Чем Present Perfect отличается от Past Simple?' },
+  { icon: FlaskConical, subject: 'Физика', text: 'Почему лёд плавает в воде? Объясни простыми словами' },
+  { icon: Sparkles, subject: 'Программирование', text: 'Составь план изучения Python с нуля на месяц' },
 ];
 
 /** «Думаю… 12 с» и подсказка, если сервис ИИ отвечает медленно. */
@@ -32,10 +32,10 @@ function Thinking({ smart }: { smart?: boolean }) {
       {sec >= 15 && (
         <p className="mt-1.5 text-[14px]">
           {sec >= 75
-            ? 'Что-то долго. Можно подождать ещё или нажать ■ и спросить снова.'
+            ? 'Что-то долго. Можно подождать ещё или нажать ■ и спросить снова.'
             : smart
-              ? 'Подробный ответ готовится дольше — обычно до минуты. Для коротких подсказок есть режим «Быстро».'
-              : 'Сервис ИИ сейчас отвечает медленно — ответ уже готовится, подождите ещё немного.'}
+              ? 'Подробный ответ готовится дольше — обычно до минуты. Для коротких подсказок есть режим «Быстро».'
+              : 'Сервис ИИ сейчас отвечает медленно — ответ уже готовится, подождите ещё немного.'}
         </p>
       )}
     </div>
@@ -125,7 +125,7 @@ export function Assistant({ name, grade: initialGrade, ai }: { name: string; gra
       });
       if (!res.ok || !res.body) {
         const out = await res.json().catch(() => ({}));
-        throw new Error(out.error || 'Помощник не ответил, попробуйте ещё раз');
+        throw new Error(out.error || 'Помощник не ответил, попробуйте ещё раз');
       }
       const reader = res.body.getReader();
       const dec = new TextDecoder();
@@ -143,8 +143,8 @@ export function Assistant({ name, grade: initialGrade, ai }: { name: string; gra
           setMsgs((cur) => [...cur.slice(0, -1), { role: 'assistant', content: next }]);
         }
       }
-      if (failure) throw new Error(failure.trim() || 'Помощник не ответил, попробуйте ещё раз');
-      if (!answer.trim()) throw new Error('Пустой ответ — попробуйте ещё раз или переформулируйте вопрос');
+      if (failure) throw new Error(failure.trim() || 'Помощник не ответил, попробуйте ещё раз');
+      if (!answer.trim()) throw new Error('Пустой ответ — попробуйте ещё раз или переформулируйте вопрос');
     } catch (e) {
       const err = e as Error;
       if (err.name === 'AbortError') {
@@ -154,7 +154,7 @@ export function Assistant({ name, grade: initialGrade, ai }: { name: string; gra
         }
       } else {
         // Связь оборвалась посреди ответа — браузер пишет непонятное «network error»
-        setError(err.name === 'TypeError' ? 'Связь с сайтом прервалась. Проверьте интернет и нажмите «Повторить».' : err.message);
+        setError(err.name === 'TypeError' ? 'Связь с сайтом прервалась. Проверьте интернет и нажмите «Повторить».' : err.message);
         setRetry({ q, base });
         if (!answer.trim()) {
           setMsgs(base);
@@ -179,10 +179,10 @@ export function Assistant({ name, grade: initialGrade, ai }: { name: string; gra
                 <Sparkles size={22} />
               </span>
               <h1 className="mt-5 text-[30px] leading-[1.1] font-medium tracking-[-0.02em] sm:text-[40px]">
-                {name.split(' ')[0]}, с чем разберёмся?
+                {name.split(' ')[0]}, с чем разберёмся?
               </h1>
               <p className="mt-3 max-w-[560px] text-[16px] text-ink-2 sm:text-[17px]">
-                Помощник объясняет по шагам, как репетитор: сначала подскажет, потом проверит. Формулы, правила, задачи — по любому предмету.
+                Помощник объясняет по шагам, как репетитор: сначала подскажет, потом проверит. Формулы, правила, задачи — по любому предмету.
               </p>
               <div className="mt-8 grid grid-cols-1 gap-3 sm:grid-cols-2">
                 {STARTERS.map((s) => (
@@ -232,8 +232,8 @@ export function Assistant({ name, grade: initialGrade, ai }: { name: string; gra
         <div className="mx-auto w-full max-w-[780px] px-4 pt-3 pb-4 sm:px-6">
           {!ai && (
             <p className="mb-3 rounded-2xl bg-[#fff4cc] px-4 py-3 text-[14px] text-ink">
-              ИИ-помощник ещё не подключён. Администратору нужно указать <code className="font-mono text-[13px]">AI_BASE_URL</code> и{' '}
-              <code className="font-mono text-[13px]">AI_API_KEY</code> в настройках сервера.
+              ИИ-помощник ещё не подключён. Администратору нужно указать <code className="font-mono text-[13px]">AI_BASE_URL</code> и{' '}
+              <code className="font-mono text-[13px]">AI_API_KEY</code> в настройках сервера.
             </p>
           )}
           <div className="mb-2.5 flex flex-wrap items-center gap-2">
@@ -334,7 +334,7 @@ export function Assistant({ name, grade: initialGrade, ai }: { name: string; gra
               </button>
             )}
           </form>
-          <p className="mt-2 text-center text-[12px] text-ink-3">Помощник может ошибаться — сверяйтесь с учебником и репетитором.</p>
+          <p className="mt-2 text-center text-[12px] text-ink-3">Помощник может ошибаться — сверяйтесь с учебником и репетитором.</p>
         </div>
       </div>
     </main>

@@ -16,7 +16,7 @@ export function Lead({ loggedIn }: { loggedIn: boolean }) {
           <p className="tag text-white/70">Попробуйте</p>
           <h2 className="mt-4 text-[38px] leading-[1.05] font-medium sm:text-[52px]">Проведите первый урок уже сегодня</h2>
           <p className="mt-5 max-w-[30rem] text-lg leading-relaxed text-white/85">
-            Зарегистрируйтесь, создайте урок и отправьте ученику ссылку — на всё уйдёт пара минут.
+            Зарегистрируйтесь, создайте урок и отправьте ученику ссылку — на всё уйдёт пара минут.
           </p>
           <ul className="mt-8 grid gap-3 text-[17px] text-white/90">
             {POINTS.map((t) => (
@@ -30,7 +30,7 @@ export function Lead({ loggedIn }: { loggedIn: boolean }) {
           </ul>
           <div className="mt-9 flex flex-col gap-3 sm:flex-row">
             <Link href={loggedIn ? '/dashboard' : '/register?role=tutor'} className="btn btn-white btn-lg">
-              {loggedIn ? 'Перейти в кабинет' : 'Начать бесплатно'}
+              {loggedIn ? 'Перейти в кабинет' : 'Начать бесплатно'}
             </Link>
             {!loggedIn && (
               <Link href="/login" className="btn btn-glass btn-lg">
