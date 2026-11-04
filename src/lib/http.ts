@@ -107,5 +107,14 @@ export function siteUrl(req: Request) {
     if (shared) return shared;
   }
   const proto = (req.headers.get('x-forwarded-proto') || '').split(',')[0].trim();
-  return `${proto || (LOCAL_HOST.test(host) ? 'http' : 'https')}://${host}`;
+  const url = `${proto || (LOCAL_HOST.test(host) ? 'http' : 'https')}://${host}`;
+  (globalThis as { __partaOrigin?: string }).__partaOrigin = url;
+  return url;
+}
+
+/** Адрес сайта для писем без запроса (фоновые задачи): домен, последний адрес, с которого открывали сайт, или localhost. */
+export function baseUrl() {
+  const domain = (process.env.DOMAIN || '').trim().replace(/^https?:\/\//, '').replace(/\/+$/, '');
+  if (domain) return `https://${domain}`;
+  return shareUrl() || (globalThis as { __partaOrigin?: string }).__partaOrigin || `http://localhost:${process.env.PORT || 3000}`;
 }

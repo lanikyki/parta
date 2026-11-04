@@ -18,6 +18,15 @@ export const EVENT_LABELS = {
   lead: 'Обращение с сайта',
   invite: 'Принял приглашение',
   support: 'Написал в поддержку',
+  phone_verified: 'Подтвердил телефон',
+  trial_start: 'Начал пробный урок',
+  payment: 'Оплатил подписку',
+  refund: 'Возврат платежа',
+  plan_grant: 'Выдан тариф',
+  bonus_grant: 'Начислены бонусы',
+  referral_join: 'Пришёл по приглашению',
+  password_change: 'Сменил пароль',
+  account_delete: 'Удалил аккаунт',
 } as const;
 export type EventKind = keyof typeof EVENT_LABELS;
 

@@ -1,5 +1,6 @@
 import { adminEmails, isAdmin } from './admin';
 import type { User } from './auth';
+import { avatarUrl } from './avatar';
 import { BRAND, gradeLabel } from './brand';
 import { one, q } from './db';
 import { logEvent } from './events';
@@ -11,7 +12,7 @@ import { filesSummary, MAX_FILES, msgPreview, type MsgFile } from './msgfile';
 // Переписка внутри сайта: репетитор ↔ ученик и пользователь ↔ поддержка (отвечают администраторы).
 
 /** Тот, кому можно написать: ученик репетитора или репетитор ученика. */
-export type Contact = { id: string; name: string; sub: string };
+export type Contact = { id: string; name: string; sub: string; avatar: string | null };
 export type ThreadItem = {
   id: string;
   /** direct — личная переписка, support — моё обращение в поддержку, inbox — обращение пользователя (видят админы) */
@@ -25,6 +26,7 @@ export type ThreadItem = {
   lastRead: boolean;
   lastAt: string;
   unread: number;
+  avatar: string | null;
 };
 export type Msg = { id: number; mine: boolean; author: string; text: string; at: string; files?: MsgFile[] };
 
@@ -74,17 +76,17 @@ export function cleanFileIds(v: unknown): string[] | null {
 export async function listContacts(user: Pick<User, 'id' | 'role'>): Promise<Contact[]> {
   const rows =
     user.role === 'tutor'
-      ? await q<{ id: string; name: string; role: string; grade: string | null }>(
-          `select u.id, u.name, u.role, u.grade from contacts c join users u on u.id = c.student_id
+      ? await q<{ id: string; name: string; role: string; grade: string | null; avatar_at: Date | null }>(
+          `select u.id, u.name, u.role, u.grade, u.avatar_at from contacts c join users u on u.id = c.student_id
             where c.tutor_id = $1 order by c.created_at desc limit 500`,
           [user.id],
         )
-      : await q<{ id: string; name: string; role: string; grade: string | null }>(
-          `select u.id, u.name, u.role, u.grade from contacts c join users u on u.id = c.tutor_id
+      : await q<{ id: string; name: string; role: string; grade: string | null; avatar_at: Date | null }>(
+          `select u.id, u.name, u.role, u.grade, u.avatar_at from contacts c join users u on u.id = c.tutor_id
             where c.student_id = $1 order by c.created_at desc limit 200`,
           [user.id],
         );
-  return rows.map((r) => ({ id: r.id, name: r.name, sub: personSub(r) }));
+  return rows.map((r) => ({ id: r.id, name: r.name, sub: personSub(r), avatar: r.avatar_at ? avatarUrl(r.id, r.avatar_at) : null }));
 }
 
 /** Ученик побывал на уроке репетитора — теперь они могут переписываться. */
@@ -135,6 +137,7 @@ type ThreadRow = {
   o_name: string | null;
   o_role: string | null;
   o_grade: string | null;
+  o_avatar_at: Date | null;
   o_email: string | null;
   last_id: number | null;
   last_text: string | null;
@@ -147,7 +150,7 @@ type ThreadRow = {
 export async function listThreads(user: Me): Promise<ThreadItem[]> {
   const rows = await q<ThreadRow>(
     `select t.id, t.kind, t.a_id, t.last_at,
-            o.id as o_id, o.name as o_name, o.role as o_role, o.grade as o_grade, o.email as o_email,
+            o.id as o_id, o.name as o_name, o.role as o_role, o.grade as o_grade, o.email as o_email, o.avatar_at as o_avatar_at,
             lm.id as last_id, lm.text as last_text, lm.files as last_files, lm.sender_id as last_sender,
             (case when t.a_id = $1 then t.b_read else t.a_read end) as o_read,
             (select count(*) from messages m where m.thread_id = t.id and (case
@@ -179,6 +182,7 @@ export async function listThreads(user: Me): Promise<ThreadItem[]> {
       lastRead: r.last_sender === user.id && (r.last_id ?? 0) <= r.o_read,
       lastAt: iso(r.last_at),
       unread: r.unread,
+      avatar: kind !== 'support' && r.o_id && r.o_avatar_at ? avatarUrl(r.o_id, r.o_avatar_at) : null,
     };
   });
 }
@@ -350,13 +354,13 @@ function notifyByMail(sender: Me, acc: Access, text: string, req: Request) {
     const toId = t.kind === 'support' ? t.a_id : acc.side === 'a' ? t.b_id : t.a_id;
     if (!toId || toId === sender.id) return;
     const read = toId === fresh.a_id ? fresh.a_read : fresh.b_read;
-    const r = await one<{ email: string; away: boolean; n: number }>(
-      `select u.email, (u.seen_at is null or u.seen_at < now() - make_interval(mins => $3)) as away,
+    const r = await one<{ email: string; notify_messages: boolean; away: boolean; n: number }>(
+      `select u.email, u.notify_messages, (u.seen_at is null or u.seen_at < now() - make_interval(mins => $3)) as away,
               (select count(*) from messages m where m.thread_id = $2 and m.id > $4 and m.sender_id is distinct from $1)::int as n
          from users u where u.id = $1`,
       [toId, t.id, AWAY_MIN, read],
     );
-    if (!r || !r.away || r.n !== 1 || !once(`${t.id}:${toId}`)) return;
+    if (!r || !r.notify_messages || !r.away || r.n !== 1 || !once(`${t.id}:${toId}`)) return;
     const l =
       t.kind === 'support'
         ? letter({
