@@ -308,6 +308,24 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
           </select>
         </label>
       )}
+      {mode === 'register' && (
+        <label className="flex items-start gap-2.5 text-[14px] leading-snug text-ink-2">
+          <input
+            type="checkbox"
+            name="consent"
+            value="1"
+            required
+            defaultChecked={saved.consent === '1'}
+            className="mt-0.5 h-5 w-5 shrink-0 accent-[var(--color-brand)]"
+          />
+          <span>
+            Даю{' '}
+            <Link href="/legal/consent" target="_blank" className="underline hover:text-ink">
+              согласие на обработку персональных данных
+            </Link>
+          </span>
+        </label>
+      )}
       <ErrorBox text={error} />
       <button type="submit" className="btn btn-primary btn-lg mt-2 w-full" disabled={busy || !ready}>
         {busy ? 'Подождите…' : mode === 'login' ? 'Войти' : 'Получить код на почту'}
@@ -318,8 +336,8 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
           Регистрируясь, вы принимаете{' '}
           <Link href="/legal/offer" target="_blank" className="underline hover:text-ink">
             условия оферты
-          </Link>{' '}
-          и соглашаетесь на обработку персональных данных по{' '}
+          </Link>
+          . Как мы храним данные, описано в{' '}
           <Link href="/legal/privacy" target="_blank" className="underline hover:text-ink">
             политике конфиденциальности
           </Link>

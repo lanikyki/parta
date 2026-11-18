@@ -223,7 +223,9 @@ docker compose version >/dev/null 2>&1 || die "Не получилось уст�
 ok "$(docker --version)"
 
 # Образы с Docker Hub. Если он недоступен из этой сети — подключаем зеркала
-IMAGES="node:22-alpine caddy:2 livekit/livekit-server:latest"
+# Версия видеосервера берётся из docker-compose.yml, чтобы не разъезжалась
+LK_IMAGE="$(awk '$1 == "image:" && $2 ~ /^livekit\// { print $2; exit }' docker-compose.yml)"
+IMAGES="node:22-alpine caddy:2 ${LK_IMAGE:-livekit/livekit-server:latest}"
 pull_all() {
   local i
   for i in $IMAGES; do docker pull -q "$i" >/dev/null 2>&1 || return 1; done
@@ -306,6 +308,14 @@ if [ "$DNS_OK" = 1 ]; then
   if [ "$code" = 200 ]; then ok "https://$SHOW открывается"; else warn "HTTPS пока не готов — Caddy получит сертификат сам в ближайшие минуты (журнал: docker compose logs caddy)"; fi
 fi
 
+# ---------- Резервные копии ----------
+step "Резервные копии"
+if [ -f /etc/parta-backup-off ]; then
+  warn "Ночные копии выключены (включить: sudo bash deploy/backup.sh --install)"
+else
+  bash deploy/backup.sh --install || warn "Не получилось включить ночные копии: sudo bash deploy/backup.sh --install"
+fi
+
 # ---------- Итог ----------
 printf '\n%sГотово! Сайт: https://%s%s\n' "$G$B" "$SHOW" "$N"
 [ "$DNS_OK" = 1 ] || echo "  (откроется, когда домен начнёт указывать на этот сервер)"
@@ -324,4 +334,5 @@ echo
 echo "Полезное (в папке $(pwd)):"
 echo "  журнал сайта:  docker compose logs -f app      перезапуск:  docker compose restart"
 echo "  обновить сайт: распакуйте новый архив поверх (unzip -o parta.zip) и снова: sudo bash deploy/setup.sh"
-echo "  резервная копия — папка data (база, картинки и файлы)"
+echo "  резервные копии: каждую ночь в /root/parta-backups; сделать сейчас: sudo bash deploy/backup.sh; восстановить: sudo bash deploy/restore.sh"
+[ -n "$(getv BACKUP_REMOTE)" ] || warn "Копии пока лежат только на этом сервере. Чтобы они уезжали на Яндекс Диск или в облако, см. начало deploy/backup.sh"

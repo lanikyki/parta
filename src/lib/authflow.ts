@@ -17,12 +17,14 @@ export async function sendCodeResponse(email: string, purpose: Purpose, payload?
     const sent = await sendCode(email, r.code, purpose);
     return json({ ok: true, step: 'code', email, wait: RESEND_SEC, mail: sent, devCode: !sent && dev() ? r.code : undefined });
   } catch (e) {
-    // Письмо не ушло (нет связи с почтой и т. п.), но код действует: он записан в окне сервера,
-    // а человек может запросить письмо ещё раз — регистрация не обрывается.
+    // Письмо не ушло (нет связи с почтой и т. п.), но код действует: человек может запросить письмо ещё раз,
+    // регистрация не обрывается. Сам код пишем в журнал только на своём компьютере: на сервере журнал
+    // видят и другие (скриншот, поддержка хостинга), а по коду можно войти в чужой аккаунт или сменить пароль.
     const why = mailErrorText(e);
-    console.error(
-      `[Почта] Письмо на ${email} не отправлено: ${why}\n        (${String((e as Error)?.message ?? e).slice(0, 300)})\n        Код для ${email}: ${r.code} — можно продиктовать (действует 15 минут)`,
-    );
+    const hint = dev()
+      ? `Код для ${email}: ${r.code} (можно продиктовать, действует 15 минут)`
+      : 'Код в журнал не пишем ради безопасности: человек может нажать «Отправить ещё раз». Проверьте SMTP_* в .env';
+    console.error(`[Почта] Письмо на ${email} не отправлено: ${why}\n        (${String((e as Error)?.message ?? e).slice(0, 300)})\n        ${hint}`);
     return json({
       ok: true,
       step: 'code',

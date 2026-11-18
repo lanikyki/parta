@@ -8,6 +8,7 @@ const DOCS = [
   ['/pricing', 'Тарифы'],
   ['/legal/offer', 'Оферта'],
   ['/legal/privacy', 'Политика конфиденциальности'],
+  ['/legal/consent', 'Согласие на обработку данных'],
   ['/legal/contacts', 'Контакты и реквизиты'],
 ] as const;
 

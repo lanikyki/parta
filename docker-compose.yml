@@ -17,7 +17,9 @@ services:
       - ./data:/app/data
 
   livekit:
-    image: livekit/livekit-server:latest
+    # Версия зафиксирована: при пересборке сайта видеосервер не обновится сам по себе.
+    # Новую версию (github.com/livekit/livekit/releases) ставим вручную: меняем тег, проверяем пробный урок.
+    image: livekit/livekit-server:v1.13.11
     restart: unless-stopped
     command: --config /etc/livekit.yaml
     environment:

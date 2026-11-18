@@ -9,7 +9,17 @@ import { body, clientIp, fail, json, rateLimit, str } from '@/lib/http';
 import { uid } from '@/lib/ids';
 import { clearRefCookie } from '@/lib/referral';
 
-type Pending = { role?: string; name?: string; grade?: string | null; password_hash?: string; owner?: string; invite?: string; ref?: string };
+type Pending = {
+  role?: string;
+  name?: string;
+  grade?: string | null;
+  password_hash?: string;
+  owner?: string;
+  invite?: string;
+  ref?: string;
+  consent_at?: string;
+  consent_v?: string;
+};
 
 /** Шаг 2 регистрации: верный код из письма → создаём аккаунт и входим. */
 export async function POST(req: Request) {
@@ -33,14 +43,13 @@ export async function POST(req: Request) {
   if (await one('select 1 from users where email = $1', [email])) return fail('Этот email уже зарегистрирован — просто войдите', 409);
   const id = uid();
   const role = p.role === 'tutor' ? 'tutor' : 'student';
-  await q('insert into users (id, role, name, email, password_hash, grade) values ($1, $2, $3, $4, $5, $6)', [
-    id,
-    role,
-    p.name,
-    email,
-    p.password_hash,
-    role === 'student' ? p.grade || null : null,
-  ]);
+  // Когда и на какую редакцию текста дано согласие на обработку персональных данных (галочка в анкете)
+  const consentAt = typeof p.consent_at === 'string' && !Number.isNaN(Date.parse(p.consent_at)) ? new Date(p.consent_at) : null;
+  const consentV = consentAt && typeof p.consent_v === 'string' ? p.consent_v.slice(0, 40) : null;
+  await q(
+    'insert into users (id, role, name, email, password_hash, grade, pd_consent_at, pd_consent_version) values ($1, $2, $3, $4, $5, $6, $7, $8)',
+    [id, role, p.name, email, p.password_hash, role === 'student' ? p.grade || null : null, consentAt, consentV],
+  );
   await createSession(id);
   await clearRegOwner();
   logEvent('register', {

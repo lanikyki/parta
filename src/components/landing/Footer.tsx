@@ -29,6 +29,7 @@ export function Footer() {
           <p className="tag text-ink-3">Документы</p>
           <Link href="/legal/offer" className="hover:text-brand-700">Публичная оферта</Link>
           <Link href="/legal/privacy" className="hover:text-brand-700">Политика конфиденциальности</Link>
+          <Link href="/legal/consent" className="hover:text-brand-700">Согласие на обработку данных</Link>
           <Link href="/legal/contacts" className="hover:text-brand-700">Контакты и реквизиты</Link>
         </nav>
       </div>

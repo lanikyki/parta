@@ -282,7 +282,7 @@ unzip -o parta.zip && cd parta && bash deploy/setup.sh
 ```
 Настройки (`.env`) и база (`data/`) сохранятся: в архиве их нет. Если код лежит на GitHub, можно и так: `git clone` один раз (для приватного репозитория GitHub попросит токен вместо пароля), а для обновления — `git pull && bash deploy/setup.sh`.
 
-**Полезное** (в папке `/root/parta`): журнал сайта — `docker compose logs -f app`, перезапуск — `docker compose restart`. После правки `.env` выполните `docker compose up -d`: простой перезапуск новые настройки не подхватывает. Если домен уже работает, а сайт по `https://` всё ещё не открывается, выполните `docker compose restart caddy`. Резервная копия — папка `data/` и файл `.env`.
+**Полезное** (в папке `/root/parta`): журнал сайта — `docker compose logs -f app`, перезапуск — `docker compose restart`. После правки `.env` выполните `docker compose up -d`: простой перезапуск новые настройки не подхватывает. Если домен уже работает, а сайт по `https://` всё ещё не открывается, выполните `docker compose restart caddy`. Резервные копии базы и `.env` скрипт установки включает сам: каждую ночь в `/root/parta-backups` (последние 14). Сделать копию сейчас — `sudo bash deploy/backup.sh`, восстановить — `sudo bash deploy/restore.sh ФАЙЛ`, а как отправлять копии на Яндекс Диск или в облако, написано в начале `deploy/backup.sh`.
 
 <details>
 <summary>Установка вручную, без скрипта</summary>

@@ -1,6 +1,7 @@
 'use client';
 
 import { CircleCheck } from 'lucide-react';
+import Link from 'next/link';
 import { useState } from 'react';
 import { WaitHint, useHydrated } from '@/components/useHydrated';
 
@@ -71,12 +72,20 @@ export function LeadForm() {
           placeholder="Например: подойдёт ли сервис для уроков музыки?"
         />
       </label>
+      <label className="flex items-start gap-2.5 text-[14px] leading-snug text-ink-2">
+        <input type="checkbox" name="consent" value="1" required className="mt-0.5 h-5 w-5 shrink-0 accent-[var(--color-brand)]" />
+        <span>
+          Даю{' '}
+          <Link href="/legal/consent" target="_blank" className="underline hover:text-ink">
+            согласие на обработку персональных данных
+          </Link>
+        </span>
+      </label>
       {error && <p className="rounded-xl bg-danger-soft px-4 py-3 text-[15px] text-danger-600">{error}</p>}
       <button type="submit" className="btn btn-primary btn-lg w-full" disabled={!ready || state === 'sending'}>
         {state === 'sending' ? 'Отправляем…' : 'Отправить вопрос'}
       </button>
       <WaitHint show={!ready} />
-      <p className="text-center text-[13px] text-ink-3">Нажимая кнопку, вы соглашаетесь на обработку персональных данных.</p>
     </form>
   );
 }

@@ -202,6 +202,10 @@ alter table users add column if not exists ref_code text;
 create unique index if not exists users_ref_idx on users(ref_code);
 alter table users add column if not exists referred_by text references users(id) on delete set null;
 create index if not exists users_referred_idx on users(referred_by);
+-- Согласие на обработку персональных данных: когда дано и на какую редакцию текста (/legal/consent)
+alter table users add column if not exists pd_consent_at timestamptz;
+alter table users add column if not exists pd_consent_version text;
+alter table leads add column if not exists consent_at timestamptz;
 -- Браузеры, из которых входили в аккаунт (чтобы нельзя было пригласить самого себя)
 create table if not exists user_devices (
   user_id text not null references users(id) on delete cascade,
