@@ -32,12 +32,25 @@ export const phoneHash = (phone: string) => `h:${crypto.createHash('sha256').upd
 
 const hash = (userId: string, phone: string, code: string) => crypto.createHash('sha256').update(`phone:${userId}:${phone}:${code}`).digest('hex');
 
+/**
+ * IP человека для SMS.ru (по нему SMS.ru ловит накрутку звонков). Локальные адреса (свой компьютер,
+ * домашняя сеть) SMS.ru не принимает: для них по правилам SMS.ru передаём -1. На сервере адреса настоящие.
+ */
+export function smsruIp(ip: string) {
+  const v = ip.trim().toLowerCase().replace(/^::ffff:/, '');
+  if (!/^[\d.:a-f]+$/.test(v)) return '-1';
+  if (/^(127|10|0)\./.test(v) || /^192\.168\./.test(v) || /^169\.254\./.test(v)) return '-1';
+  if (/^172\.(1[6-9]|2\d|3[01])\./.test(v) || /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(v)) return '-1';
+  if (v === '::1' || v === '::' || /^f[cd]/.test(v) || /^fe[89ab]/.test(v)) return '-1';
+  return v;
+}
+
 /** Звонок через SMS.ru. Возвращает 4 цифры, которые увидит человек (конец номера, с которого звонят). */
 async function smsruCall(phone: string, ip: string) {
   const base = (process.env.SMSRU_URL || 'https://sms.ru').replace(/\/+$/, '');
   const url = new URL(`${base}/code/call`);
   url.searchParams.set('phone', phone);
-  url.searchParams.set('ip', /^[\d.:a-f]+$/i.test(ip) ? ip : '-1');
+  url.searchParams.set('ip', smsruIp(ip));
   url.searchParams.set('api_id', (process.env.SMSRU_API_ID || '').trim());
   const res = await fetch(url, { signal: AbortSignal.timeout(20_000) });
   const j = (await res.json().catch(() => ({}))) as { status?: string; code?: unknown; status_text?: string };
